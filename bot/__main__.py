@@ -77,8 +77,11 @@ async def main() -> None:
         timeout=settings.grok_timeout,
         max_tokens=settings.grok_max_tokens,
         temperature=settings.grok_temperature,
+        retries=settings.grok_retries,
     )
-    interpreter = Interpreter(grok, author_name=settings.author_name)
+    interpreter = Interpreter(
+        grok, author_name=settings.author_name, deadline=settings.grok_deadline
+    )
 
     bot = Bot(
         settings.bot_token,

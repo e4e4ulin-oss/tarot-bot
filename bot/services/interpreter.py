@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from dataclasses import dataclass
@@ -96,19 +97,27 @@ def to_telegram_html(raw: str) -> str:
 class Interpreter:
     """Делает разбор через Grok, а если он недоступен — собирает его из базы значений."""
 
-    def __init__(self, grok: GrokClient, *, author_name: str = "") -> None:
+    def __init__(self, grok: GrokClient, *, author_name: str = "", deadline: float = 45.0) -> None:
         self.grok = grok
         self.author_name = author_name
+        self.deadline = deadline
 
     async def interpret(
         self, spread: Spread, drawn: list[DrawnCard], question: str | None
     ) -> Interpretation:
         if self.grok.enabled:
             try:
-                raw = await self.grok.complete(
-                    SYSTEM_PROMPT, build_prompt(spread, drawn, question, self.author_name)
+                raw = await asyncio.wait_for(
+                    self.grok.complete(
+                        SYSTEM_PROMPT, build_prompt(spread, drawn, question, self.author_name)
+                    ),
+                    timeout=self.deadline,
                 )
                 return Interpretation(text=to_telegram_html(raw), ai_used=True)
+            except TimeoutError:
+                logger.warning(
+                    "Grok не уложился в %s с, отдаём базовые значения карт", self.deadline
+                )
             except GrokError as exc:
                 logger.warning("Разбор через Grok не получился, отдаём базовые значения: %s", exc)
 

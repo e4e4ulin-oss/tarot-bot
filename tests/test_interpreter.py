@@ -84,3 +84,27 @@ async def test_interpret_uses_grok_answer_when_available(monkeypatch):
     result = await Interpreter(client).interpret(spread, drawn, "Как дела?")
     assert result.ai_used is True
     assert "<b>Общая картина</b>" in result.text
+
+
+@pytest.mark.asyncio
+async def test_interpret_gives_up_on_a_hanging_grok():
+    """Если модель молчит, человек не должен ждать вечно — сработает дедлайн."""
+    import asyncio
+
+    client = GrokClient(api_key="test-key")
+
+    async def hang(*args, **kwargs):
+        await asyncio.sleep(30)
+
+    client.complete = hang  # type: ignore[method-assign]
+
+    spread = get_spread("day")
+    drawn = draw_spread(spread, rng=Random(8))
+
+    started = asyncio.get_running_loop().time()
+    result = await Interpreter(client, deadline=0.2).interpret(spread, drawn, None)
+    elapsed = asyncio.get_running_loop().time() - started
+
+    assert result.ai_used is False
+    assert result.text
+    assert elapsed < 2, f"дедлайн не сработал, ждали {elapsed:.1f} с"

@@ -8,6 +8,7 @@ from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
+from aiogram.utils.chat_action import ChatActionSender
 
 from .. import texts
 from ..config import Settings
@@ -127,7 +128,9 @@ async def run_reading(
     cards_message = await message.answer(format_cards(spread, drawn, question))
     status = await message.answer(texts.INTERPRETING)
 
-    result = await interpreter.interpret(spread, drawn, question)
+    # «печатает…» в чате, пока модель думает — иначе кажется, что бот завис
+    async with ChatActionSender.typing(bot=message.bot, chat_id=message.chat.id):
+        result = await interpreter.interpret(spread, drawn, question)
 
     try:
         await status.delete()

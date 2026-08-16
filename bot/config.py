@@ -31,7 +31,10 @@ class Settings(BaseSettings):
     xai_api_key: str = Field(default="", alias="XAI_API_KEY")
     xai_base_url: str = Field(default="https://api.x.ai/v1", alias="XAI_BASE_URL")
     grok_model: str = Field(default="grok-4", alias="GROK_MODEL")
-    grok_timeout: float = Field(default=60.0, alias="GROK_TIMEOUT")
+    grok_timeout: float = Field(default=30.0, alias="GROK_TIMEOUT")
+    # Общий предел ожидания: сколько бот вообще готов ждать разбор, включая повторы
+    grok_deadline: float = Field(default=45.0, alias="GROK_DEADLINE")
+    grok_retries: int = Field(default=1, alias="GROK_RETRIES")
     grok_max_tokens: int = Field(default=1200, alias="GROK_MAX_TOKENS")
     grok_temperature: float = Field(default=0.8, alias="GROK_TEMPERATURE")
 
@@ -49,7 +52,9 @@ class Settings(BaseSettings):
         "admin_chat_id",
         "allow_reversed",
         "daily_auto_limit",
+        "grok_deadline",
         "grok_max_tokens",
+        "grok_retries",
         "grok_temperature",
         "grok_timeout",
         "max_question_length",
