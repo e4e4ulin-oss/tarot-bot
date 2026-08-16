@@ -294,3 +294,29 @@ async def test_client_cannot_run_admin_actions(env):
         refreshed = await Repo(db).get_order(order.id)
     assert refreshed.status is OrderStatus.NEW
     assert not session.methods("SendMessage")
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_diag_reports_missing_grok_key(env):
+    """Автор должен видеть причину прямо в боте, не залезая в логи хостинга."""
+    dp, bot, session, _ = env
+    session.clear()
+
+    await feed(dp, bot, make_message("/diag", chat_id=ADMIN_CHAT_ID, user_id=ADMIN_ID), 1)
+
+    texts_sent = session.texts()
+    assert texts_sent, session.calls
+    report = texts_sent[0]
+    assert "XAI_API_KEY" in report
+    assert "Диагностика" in report
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_diag_is_admin_only(env):
+    """Обычный клиент команду не получает — она уходит в общий фолбэк."""
+    dp, bot, session, _ = env
+    session.clear()
+
+    await feed(dp, bot, make_message("/diag", chat_id=2001), 1)
+
+    assert all("Диагностика" not in text for text in session.texts())

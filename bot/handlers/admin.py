@@ -15,6 +15,7 @@ from ..config import Settings
 from ..db import Order, OrderStatus, Repo
 from ..filters import IsAdmin
 from ..keyboards import admin_order_menu, followup_menu
+from ..services import GrokError, Interpreter
 from ..states import AdminFlow
 from ..utils import fmt_date
 
@@ -177,3 +178,43 @@ async def cmd_order(message: Message, repo: Repo) -> None:
 @router.message(Command("stats"))
 async def cmd_stats(message: Message, repo: Repo) -> None:
     await message.answer(texts.ADMIN_STATS.format(**await repo.stats()))
+
+
+@router.message(Command("diag"))
+async def cmd_diag(message: Message, settings: Settings, interpreter: Interpreter) -> None:
+    """Проверка настроек и живой запрос к Grok — чтобы не искать причину в логах хостинга."""
+    lines = [
+        "<b>Диагностика</b>",
+        "",
+        f"Админ-чат: {'задан' if settings.admin_chat_id else '❌ не задан (ADMIN_CHAT_ID)'}",
+        f"Кто отвечает на заявки: {settings.admin_ids or '❌ не задано (ADMIN_IDS)'}",
+        f"Лимит авто-раскладов в сутки: {settings.daily_auto_limit or 'без лимита'}",
+        "",
+        f"<b>Grok</b>\nМодель: <code>{texts.esc(settings.grok_model)}</code>",
+        f"Адрес: <code>{texts.esc(settings.xai_base_url)}</code>",
+    ]
+
+    if not interpreter.grok.enabled:
+        lines.append(
+            "Ключ: ❌ не задан.\nДобавьте переменную <code>XAI_API_KEY</code> "
+            "и перезапустите бота — до тех пор разбор идёт по базе значений карт."
+        )
+        await message.answer("\n".join(lines))
+        return
+
+    lines.append("Ключ: задан, проверяю ответ…")
+    status = await message.answer("\n".join(lines))
+
+    try:
+        reply = await interpreter.grok.complete(
+            "Отвечай одним словом.", "Скажи: готово", max_tokens=16
+        )
+        lines[-1] = f"Ключ: ✅ работает (ответ модели: «{texts.esc(reply[:40])}»)"
+    except GrokError as exc:
+        lines[-1] = (
+            f"Ключ: ❌ Grok не отвечает.\n<code>{texts.esc(str(exc)[:300])}</code>\n\n"
+            "Частые причины: неверный ключ, нулевой баланс в console.x.ai "
+            "или регион сервера, из которого x.ai не обслуживает запросы."
+        )
+
+    await status.edit_text("\n".join(lines))
