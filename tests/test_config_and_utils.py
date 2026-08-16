@@ -69,3 +69,22 @@ def test_fmt_date():
     value = datetime(2026, 8, 16, 12, 30, tzinfo=UTC)
     assert fmt_date(value) == "16.08.2026 12:30"
     assert fmt_date(None) == "—"
+
+
+def test_missing_bot_token_gives_readable_message(monkeypatch):
+    """Вместо трассировки pydantic пользователь должен видеть понятную подсказку."""
+    from pydantic import ValidationError
+
+    from bot.config import Settings, describe_missing_settings
+
+    monkeypatch.delenv("BOT_TOKEN", raising=False)
+    try:
+        Settings(_env_file=None)
+    except ValidationError as exc:
+        message = describe_missing_settings(exc)
+    else:  # pragma: no cover - без токена настройки собраться не должны
+        raise AssertionError("ожидалась ошибка валидации")
+
+    assert "BOT_TOKEN" in message
+    assert "Variables" in message
+    assert "Traceback" not in message

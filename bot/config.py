@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Annotated
 
-from pydantic import Field, ValidationInfo, field_validator
+from pydantic import Field, ValidationError, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -76,6 +76,26 @@ class Settings(BaseSettings):
 
     def is_admin(self, user_id: int) -> bool:
         return user_id in self.admin_ids
+
+
+MISSING_SETTINGS_HINT = """
+Бот не запущен: не заданы обязательные переменные окружения — {names}.
+
+Где их задать:
+  • на хостинге (Railway, Render) — в разделе Variables того сервиса,
+    который запускает бота, после чего передеплоить его;
+  • на своём сервере или компьютере — в файле .env рядом с проектом.
+
+Токен берётся у @BotFather: /mybots → ваш бот → API Token.
+"""
+
+
+def describe_missing_settings(error: ValidationError) -> str:
+    """Понятное сообщение вместо трассировки pydantic."""
+    names = [str(item["loc"][0]).upper() for item in error.errors() if item["type"] == "missing"]
+    if not names:
+        return f"Настройки заданы неверно:\n{error}"
+    return MISSING_SETTINGS_HINT.format(names=", ".join(names))
 
 
 @lru_cache(maxsize=1)

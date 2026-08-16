@@ -10,8 +10,9 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand
+from pydantic import ValidationError
 
-from .config import Settings, get_settings
+from .config import Settings, describe_missing_settings, get_settings
 from .db import create_engine, create_session_factory, init_models
 from .handlers import build_router
 from .middlewares import DbSessionMiddleware, ThrottlingMiddleware, UserMiddleware
@@ -48,7 +49,11 @@ def build_dispatcher(
 
 
 async def main() -> None:
-    settings = get_settings()
+    try:
+        settings = get_settings()
+    except ValidationError as exc:
+        raise SystemExit(describe_missing_settings(exc)) from None
+
     logging.basicConfig(
         level=getattr(logging, settings.log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
