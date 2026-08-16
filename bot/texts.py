@@ -153,6 +153,12 @@ ADMIN_TAKEN = "Заявка №{order_id} — в работе у {admin}."
 
 ADMIN_DECLINED = "Заявка №{order_id} отклонена."
 
+ADMIN_ONLY = (
+    "Эта команда доступна только автору бота.\n\n"
+    "Если автор — вы, добавьте свой Telegram-id в переменную <code>ADMIN_IDS</code> "
+    "и перезапустите бота. Узнать id: команда /chatid."
+)
+
 ADMIN_NO_ORDERS = "Открытых заявок нет."
 
 ADMIN_ORDERS_HEADER = "<b>Открытые заявки</b>"

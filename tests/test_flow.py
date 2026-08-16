@@ -319,4 +319,6 @@ async def test_diag_is_admin_only(env):
 
     await feed(dp, bot, make_message("/diag", chat_id=2001), 1)
 
-    assert all("Диагностика" not in text for text in session.texts())
+    sent = session.texts()
+    assert all("Диагностика" not in text for text in sent)
+    assert any("только автору" in text for text in sent), sent
