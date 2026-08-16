@@ -165,10 +165,11 @@ FSM хранится в памяти процесса: после перезап
 Если возиться с VPS не хочется, бот разворачивается из браузера — код берётся прямо
 из GitHub, терминал не нужен.
 
-**Railway** (`railway.toml` в репозитории): New Project → Deploy from GitHub repo →
-выбрать `tarot-bot`. В разделе Variables добавить `BOT_TOKEN`, при желании `XAI_API_KEY`,
+**Railway**: New Project → Deploy from GitHub repo → выбрать `tarot-bot`. Сборка идёт
+по `Dockerfile`. В разделе Variables добавить `BOT_TOKEN`, при желании `XAI_API_KEY`,
 `ADMIN_CHAT_ID`, `ADMIN_IDS`. В Settings → Volumes подключить том на `/app/data`,
-иначе база раскладов и заявок будет теряться при каждом передеплое.
+иначе база раскладов и заявок будет теряться при каждом передеплое. Инструкцию `VOLUME`
+в Dockerfile Railway не принимает — поэтому её там и нет, том задаётся только в Settings.
 
 **Render** (`render.yaml` в репозитории): New → Blueprint → указать репозиторий.
 Сервис создаётся как **worker** (фоновый процесс, не веб-сервис) вместе с диском
