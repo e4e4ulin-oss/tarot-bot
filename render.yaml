@@ -1,0 +1,23 @@
+# Деплой на Render: тип worker — фоновый постоянный процесс, а не веб-сервис.
+services:
+  - type: worker
+    name: tarot-bot
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m bot
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_CHAT_ID
+        sync: false
+      - key: ADMIN_IDS
+        sync: false
+      - key: XAI_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        value: sqlite+aiosqlite:////var/data/tarot.db
+    disk:
+      name: tarot-data
+      mountPath: /var/data
+      sizeGB: 1
