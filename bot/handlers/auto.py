@@ -5,9 +5,9 @@ from __future__ import annotations
 import logging
 
 from aiogram import F, Router
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, FSInputFile, InputMediaPhoto, Message
 from aiogram.utils.chat_action import ChatActionSender
 
 from .. import texts
@@ -16,7 +16,8 @@ from ..db import Repo
 from ..keyboards import after_reading_menu, question_menu, spreads_menu
 from ..services.interpreter import DISCLAIMER, Interpreter
 from ..states import AutoFlow
-from ..tarot import SPREADS, Spread, draw_spread, format_cards, get_spread, serialize
+from ..tarot import SPREADS, DrawnCard, Spread, draw_spread, format_cards, get_spread, serialize
+from ..tarot.images import commons_url, local_path
 from ..utils import split_text
 
 logger = logging.getLogger(__name__)
@@ -98,6 +99,39 @@ async def on_non_text_question(message: Message) -> None:
     await message.answer(texts.QUESTION_REQUIRED)
 
 
+async def send_card_images(
+    message: Message, drawn: list[DrawnCard], repo: Repo, settings: Settings
+) -> None:
+    """Показывает сами карты. Своя картинка приоритетнее скана, ссылка — на крайний случай.
+
+    Присланный Telegram file_id сохраняется, поэтому к источнику бот идёт один раз на карту.
+    Картинки — украшение: любая неудача здесь не должна мешать раскладу.
+    """
+    if not settings.send_card_images or len(drawn) > settings.image_cards_limit:
+        return
+
+    cached = await repo.card_file_ids([item.card.id for item in drawn])
+    media: list[InputMediaPhoto] = []
+    for item in drawn:
+        if (file_id := cached.get(item.card.id)) is not None:
+            source: str | FSInputFile = file_id
+        elif (path := local_path(item.card)) is not None:
+            source = FSInputFile(path)
+        else:
+            source = commons_url(item.card)
+        media.append(InputMediaPhoto(media=source, caption=item.title))
+
+    try:
+        sent = await message.answer_media_group(media)
+    except TelegramAPIError as exc:
+        logger.warning("Картинки карт отправить не удалось: %s", exc)
+        return
+
+    for item, sent_message in zip(drawn, sent, strict=False):
+        if sent_message.photo:
+            await repo.save_card_file_id(item.card.id, sent_message.photo[-1].file_id)
+
+
 async def run_reading(
     message: Message,
     user_id: int,
@@ -125,6 +159,7 @@ async def run_reading(
         reversed_chance=settings.reversed_chance,
     )
 
+    await send_card_images(message, drawn, repo, settings)
     cards_message = await message.answer(format_cards(spread, drawn, question))
     status = await message.answer(texts.INTERPRETING)
 

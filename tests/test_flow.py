@@ -15,7 +15,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.base import BaseSession
 from aiogram.enums import ParseMode
 from aiogram.methods import TelegramMethod
-from aiogram.types import CallbackQuery, Chat, MessageId, Update, User
+from aiogram.types import CallbackQuery, Chat, MessageId, PhotoSize, Update, User
 from aiogram.types import Message as TgMessage
 
 from bot.__main__ import build_dispatcher
@@ -60,6 +60,23 @@ class FakeSession(BaseSession):
             ).as_(bot)
         if name == "CopyMessage":
             return MessageId(message_id=self._message_id)
+        if name == "SendMediaGroup":
+            return [
+                TgMessage(
+                    message_id=self._message_id + offset,
+                    date=datetime.now(UTC),
+                    chat=Chat(id=method.chat_id, type="private"),
+                    photo=[
+                        PhotoSize(
+                            file_id=f"file-{self._message_id + offset}",
+                            file_unique_id=f"uniq-{self._message_id + offset}",
+                            width=1112,
+                            height=1920,
+                        )
+                    ],
+                ).as_(bot)
+                for offset in range(len(method.media))
+            ]
         return True
 
     def methods(self, name: str) -> list[TelegramMethod]:
@@ -322,3 +339,40 @@ async def test_diag_is_admin_only(env):
     sent = session.texts()
     assert all("Диагностика" not in text for text in sent)
     assert any("только автору" in text for text in sent), sent
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_reading_sends_card_images_and_caches_file_ids(env):
+    """Карты уходят картинками, а полученный file_id сохраняется для повторов."""
+    dp, bot, session, factory = env
+    chat = 1008
+
+    await feed(dp, bot, make_callback("draw:day", chat_id=chat), 1)
+
+    albums = session.methods("SendMediaGroup")
+    assert albums, session.calls
+    assert len(albums[0].media) == 1
+
+    async with factory() as db:
+        readings = await Repo(db).last_readings(chat)
+        card_id = readings[0].cards[0]["card"]
+        cached = await Repo(db).card_file_ids([card_id])
+    assert cached.get(card_id), "file_id карты не сохранился"
+
+    # та же карта во второй раз уходит уже по file_id, без обращения к Викискладу
+    from bot.handlers.auto import send_card_images
+    from bot.tarot import deserialize
+
+    drawn = deserialize(readings[0].cards)
+    anchor = TgMessage(
+        message_id=99,
+        date=datetime.now(UTC),
+        chat=Chat(id=chat, type="private"),
+    ).as_(bot)
+
+    session.clear()
+    async with factory() as db:
+        await send_card_images(anchor, drawn, Repo(db), dp["settings"])
+
+    sources = [item.media for item in session.methods("SendMediaGroup")[0].media]
+    assert sources == [cached[card_id]], sources

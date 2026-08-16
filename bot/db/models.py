@@ -77,6 +77,16 @@ class Reading(Base):
     user: Mapped[User] = relationship(back_populates="readings")
 
 
+class CardImage(Base):
+    """Кэш картинок: id карты → file_id в Telegram, чтобы не ходить к источнику дважды."""
+
+    __tablename__ = "card_images"
+
+    card_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    file_id: Mapped[str] = mapped_column(String(256))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Order(Base):
     """Заявка на авторский разбор: Анастасия раскладывает и разбирает сама."""
 

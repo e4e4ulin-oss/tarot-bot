@@ -46,6 +46,12 @@ class Settings(BaseSettings):
     # --- Хранилище ---
     database_url: str = Field(default="sqlite+aiosqlite:///data/tarot.db", alias="DATABASE_URL")
 
+    # --- Картинки карт ---
+    send_card_images: bool = Field(default=True, alias="SEND_CARD_IMAGES")
+    # Раскладам крупнее этого числа картинки не отправляются: десять фото подряд
+    # превращают чат в свалку
+    image_cards_limit: int = Field(default=3, alias="IMAGE_CARDS_LIMIT")
+
     # --- Правила работы ---
     daily_auto_limit: int = Field(default=5, alias="DAILY_AUTO_LIMIT")
     allow_reversed: bool = Field(default=True, alias="ALLOW_REVERSED")
@@ -62,7 +68,9 @@ class Settings(BaseSettings):
         "grok_retries",
         "grok_temperature",
         "grok_timeout",
+        "image_cards_limit",
         "max_question_length",
+        "send_card_images",
         "reversed_chance",
         mode="before",
     )

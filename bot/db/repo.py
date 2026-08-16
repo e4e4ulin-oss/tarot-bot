@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import Order, OrderStatus, Reading, ReadingMode, User, utcnow
+from .models import CardImage, Order, OrderStatus, Reading, ReadingMode, User, utcnow
 
 
 class Repo:
@@ -77,6 +77,19 @@ class Repo:
 
     async def get_reading(self, reading_id: int) -> Reading | None:
         return await self.session.get(Reading, reading_id)
+
+    # --- Кэш картинок карт ----------------------------------------------
+    async def card_file_ids(self, card_ids: list[str]) -> dict[str, str]:
+        if not card_ids:
+            return {}
+        stmt = select(CardImage).where(CardImage.card_id.in_(card_ids))
+        return {row.card_id: row.file_id for row in (await self.session.scalars(stmt)).all()}
+
+    async def save_card_file_id(self, card_id: str, file_id: str) -> None:
+        if await self.session.get(CardImage, card_id) is not None:
+            return
+        self.session.add(CardImage(card_id=card_id, file_id=file_id))
+        await self.session.commit()
 
     # --- Заявки на авторский разбор -------------------------------------
     async def create_order(

@@ -1,6 +1,7 @@
 from .models import (
     ORDER_STATUS_LABELS,
     Base,
+    CardImage,
     Order,
     OrderStatus,
     Reading,
@@ -13,6 +14,7 @@ from .session import create_engine, create_session_factory, init_models
 __all__ = [
     "ORDER_STATUS_LABELS",
     "Base",
+    "CardImage",
     "Order",
     "OrderStatus",
     "Reading",
