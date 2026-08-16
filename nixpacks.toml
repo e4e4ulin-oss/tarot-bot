@@ -1,0 +1,8 @@
+# Явные команды сборки для Railway (Nixpacks).
+# Без этого сборщик видит pyproject.toml и пытается установить проект как пакет,
+# а он описан только для линтера — сборочного бэкенда там нет.
+[phases.install]
+cmds = ["python -m venv /opt/venv && /opt/venv/bin/pip install --upgrade pip && /opt/venv/bin/pip install -r requirements.txt"]
+
+[start]
+cmd = "/opt/venv/bin/python -m bot"

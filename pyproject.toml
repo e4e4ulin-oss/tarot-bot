@@ -3,6 +3,21 @@ name = "tarot-bot"
 version = "1.0.0"
 description = "Telegram-бот для раскладов Таро: авто-разбор через Grok и авторский разбор от Анастасии"
 requires-python = ">=3.11"
+dynamic = ["dependencies"]
+
+# Чтобы сборщики хостингов, которые пробуют `pip install .`, не спотыкались
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["bot*"]
+
+[tool.setuptools.package-data]
+"bot.tarot" = ["data/*.json"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
 
 [tool.ruff]
 line-length = 100
