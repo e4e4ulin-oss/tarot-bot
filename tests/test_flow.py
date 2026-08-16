@@ -307,7 +307,7 @@ async def test_diag_reports_missing_grok_key(env):
     texts_sent = session.texts()
     assert texts_sent, session.calls
     report = texts_sent[0]
-    assert "XAI_API_KEY" in report
+    assert "AI_API_KEY" in report
     assert "Диагностика" in report
 
 

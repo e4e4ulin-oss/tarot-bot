@@ -182,7 +182,7 @@ async def cmd_stats(message: Message, repo: Repo) -> None:
 
 @router.message(Command("diag"))
 async def cmd_diag(message: Message, settings: Settings, interpreter: Interpreter) -> None:
-    """Проверка настроек и живой запрос к Grok — чтобы не искать причину в логах хостинга."""
+    """Проверка настроек и живой запрос к модели — чтобы не искать причину в логах хостинга."""
     lines = [
         "<b>Диагностика</b>",
         "",
@@ -190,13 +190,13 @@ async def cmd_diag(message: Message, settings: Settings, interpreter: Interprete
         f"Кто отвечает на заявки: {settings.admin_ids or '❌ не задано (ADMIN_IDS)'}",
         f"Лимит авто-раскладов в сутки: {settings.daily_auto_limit or 'без лимита'}",
         "",
-        f"<b>Grok</b>\nМодель: <code>{texts.esc(settings.grok_model)}</code>",
-        f"Адрес: <code>{texts.esc(settings.xai_base_url)}</code>",
+        f"<b>Разбор от ИИ</b>\nМодель: <code>{texts.esc(settings.ai_model)}</code>",
+        f"Адрес: <code>{texts.esc(settings.ai_base_url)}</code>",
     ]
 
     if not interpreter.grok.enabled:
         lines.append(
-            "Ключ: ❌ не задан.\nДобавьте переменную <code>XAI_API_KEY</code> "
+            "Ключ: ❌ не задан.\nДобавьте переменную <code>AI_API_KEY</code> "
             "и перезапустите бота — до тех пор разбор идёт по базе значений карт."
         )
         await message.answer("\n".join(lines))
@@ -212,9 +212,9 @@ async def cmd_diag(message: Message, settings: Settings, interpreter: Interprete
         lines[-1] = f"Ключ: ✅ работает (ответ модели: «{texts.esc(reply[:40])}»)"
     except GrokError as exc:
         lines[-1] = (
-            f"Ключ: ❌ Grok не отвечает.\n<code>{texts.esc(str(exc)[:300])}</code>\n\n"
-            "Частые причины: неверный ключ, нулевой баланс в console.x.ai "
-            "или регион сервера, из которого x.ai не обслуживает запросы."
+            f"Ключ: ❌ модель не отвечает.\n<code>{texts.esc(str(exc)[:300])}</code>\n\n"
+            "Частые причины: неверный ключ, нулевой баланс у провайдера, "
+            "недоступная модель или блокировка по региону."
         )
 
     await status.edit_text("\n".join(lines))

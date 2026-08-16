@@ -71,9 +71,9 @@ async def main() -> None:
     session_factory = create_session_factory(engine)
 
     grok = GrokClient(
-        settings.xai_api_key,
-        base_url=settings.xai_base_url,
-        model=settings.grok_model,
+        settings.ai_api_key,
+        base_url=settings.ai_base_url,
+        model=settings.ai_model,
         timeout=settings.grok_timeout,
         max_tokens=settings.grok_max_tokens,
         temperature=settings.grok_temperature,

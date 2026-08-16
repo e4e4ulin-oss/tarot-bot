@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Annotated
 
-from pydantic import Field, ValidationError, ValidationInfo, field_validator
+from pydantic import AliasChoices, Field, ValidationError, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -27,10 +27,15 @@ class Settings(BaseSettings):
     author_name: str = Field(default="Анастасия", alias="AUTHOR_NAME")
     author_price_text: str = Field(default="", alias="AUTHOR_PRICE_TEXT")
 
-    # --- Grok (xAI) ---
-    xai_api_key: str = Field(default="", alias="XAI_API_KEY")
-    xai_base_url: str = Field(default="https://api.x.ai/v1", alias="XAI_BASE_URL")
-    grok_model: str = Field(default="grok-4", alias="GROK_MODEL")
+    # --- Языковая модель ---
+    # Любой OpenAI-совместимый провайдер: xAI, Groq, Google Gemini, OpenRouter, Cerebras.
+    # Имена XAI_*/GROK_* оставлены ради совместимости с уже настроенными сервисами.
+    ai_api_key: str = Field(default="", validation_alias=AliasChoices("AI_API_KEY", "XAI_API_KEY"))
+    ai_base_url: str = Field(
+        default="https://api.x.ai/v1",
+        validation_alias=AliasChoices("AI_BASE_URL", "XAI_BASE_URL"),
+    )
+    ai_model: str = Field(default="grok-4", validation_alias=AliasChoices("AI_MODEL", "GROK_MODEL"))
     grok_timeout: float = Field(default=30.0, alias="GROK_TIMEOUT")
     # Общий предел ожидания: сколько бот вообще готов ждать разбор, включая повторы
     grok_deadline: float = Field(default=45.0, alias="GROK_DEADLINE")
@@ -77,7 +82,7 @@ class Settings(BaseSettings):
 
     @property
     def ai_enabled(self) -> bool:
-        return bool(self.xai_api_key)
+        return bool(self.ai_api_key)
 
     def is_admin(self, user_id: int) -> bool:
         return user_id in self.admin_ids

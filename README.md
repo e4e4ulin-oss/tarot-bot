@@ -229,11 +229,22 @@ journalctl -u tarot-bot -f
 Держите один запущенный экземпляр бота: два процесса с одним токеном будут
 конфликтовать за long polling.
 
-### Grok
+### Языковая модель
 
-Используется OpenAI-совместимый endpoint `POST {XAI_BASE_URL}/chat/completions`.
-Модель задаётся `GROK_MODEL` — при появлении новой версии достаточно поменять
-переменную окружения. Ключ живёт только на сервере.
+Разбор собирает любой OpenAI-совместимый провайдер: бот шлёт
+`POST {AI_BASE_URL}/chat/completions`. Сменить провайдера — это три переменные
+окружения, код при этом не меняется:
+
+| Провайдер | `AI_BASE_URL` | `AI_MODEL` |
+| --- | --- | --- |
+| Google Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-2.5-flash` |
+| Groq | `https://api.groq.com/openai/v1` | `llama-3.3-70b-versatile` |
+| OpenRouter | `https://openrouter.ai/api/v1` | модель с суффиксом `:free` |
+| xAI (платный) | `https://api.x.ai/v1` | `grok-4` |
+
+У первых трёх есть бесплатные тарифы — лимиты уточняйте у провайдера, они меняются.
+Старые имена `XAI_API_KEY`, `XAI_BASE_URL`, `GROK_MODEL` продолжают работать.
+Ключ живёт только на сервере и в репозиторий не попадает.
 
 Системный промпт (`bot/services/interpreter.py`) запрещает модели фатализм,
 предсказания смерти, болезней, диагнозов и исходов судебных дел — в таких темах

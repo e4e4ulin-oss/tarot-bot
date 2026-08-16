@@ -89,3 +89,21 @@ def test_missing_bot_token_gives_readable_message(monkeypatch):
     assert "BOT_TOKEN" in message
     assert "Variables" in message
     assert "Traceback" not in message
+
+
+def test_ai_provider_accepts_both_env_names():
+    """Настройки читаются и под нейтральными именами, и под старыми XAI_*/GROK_*."""
+    neutral = Settings(
+        BOT_TOKEN="t",
+        AI_API_KEY="k1",
+        AI_BASE_URL="https://api.groq.com/openai/v1",
+        AI_MODEL="llama-3.3-70b-versatile",
+    )
+    assert neutral.ai_enabled
+    assert neutral.ai_base_url.endswith("/openai/v1")
+    assert neutral.ai_model == "llama-3.3-70b-versatile"
+
+    legacy = Settings(BOT_TOKEN="t", XAI_API_KEY="k2", GROK_MODEL="grok-4")
+    assert legacy.ai_api_key == "k2"
+    assert legacy.ai_model == "grok-4"
+    assert legacy.ai_base_url == "https://api.x.ai/v1"
