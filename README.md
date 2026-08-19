@@ -256,11 +256,13 @@ Telegram, а полученный `file_id` бот кэширует в табл�
 | Провайдер | `AI_BASE_URL` | `AI_MODEL` |
 | --- | --- | --- |
 | Google Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-2.5-flash` |
-| Groq | `https://api.groq.com/openai/v1` | `llama-3.3-70b-versatile` |
+| Groq | `https://api.groq.com/openai/v1` | `openai/gpt-oss-120b` |
 | OpenRouter | `https://openrouter.ai/api/v1` | модель с суффиксом `:free` |
 | xAI (платный) | `https://api.x.ai/v1` | `grok-4` |
 
 У первых трёх есть бесплатные тарифы — лимиты уточняйте у провайдера, они меняются.
+Имена моделей тоже меняются: провайдеры выводят старые из обращения, и тогда в `/diag`
+появляется ошибка «model not found». Актуальный список — в документации провайдера.
 Старые имена `XAI_API_KEY`, `XAI_BASE_URL`, `GROK_MODEL` продолжают работать.
 Ключ живёт только на сервере и в репозиторий не попадает.
 

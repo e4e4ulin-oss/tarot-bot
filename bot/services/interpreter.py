@@ -37,6 +37,8 @@ SYSTEM_PROMPT = """\
 — Всего 250–450 слов. Не повторяй список карт в начале ответа.
 """
 
+# Рассуждающие модели иногда отдают свои размышления вместе с ответом
+_THINKING = re.compile(r"<(think|thinking|reasoning)>.*?</\1>", re.DOTALL | re.IGNORECASE)
 _MARKDOWN_NOISE = re.compile(r"[*_#`]+")
 _MULTI_BLANK = re.compile(r"\n{3,}")
 
@@ -75,7 +77,8 @@ def build_prompt(
 
 def to_telegram_html(raw: str) -> str:
     """Grok просят отвечать обычным текстом; на всякий случай чистим разметку и экранируем."""
-    cleaned = _MARKDOWN_NOISE.sub("", raw).strip()
+    cleaned = _THINKING.sub("", raw)
+    cleaned = _MARKDOWN_NOISE.sub("", cleaned).strip()
     cleaned = _MULTI_BLANK.sub("\n\n", cleaned)
     lines: list[str] = []
     for line in cleaned.split("\n"):

@@ -108,3 +108,16 @@ async def test_interpret_gives_up_on_a_hanging_grok():
     assert result.ai_used is False
     assert result.text
     assert elapsed < 2, f"дедлайн не сработал, ждали {elapsed:.1f} с"
+
+
+def test_thinking_block_never_reaches_the_reader():
+    """Некоторые модели отдают внутренние рассуждения — их быть в ответе не должно."""
+    raw = (
+        "<think>User asks about work. Cards: Knight reversed…</think>\n"
+        "Ситуация\nВы спешите с решением.\n\nОбщая картина\nВсё выправляется."
+    )
+    html = to_telegram_html(raw)
+    assert "think" not in html.lower()
+    assert "User asks" not in html
+    assert html.startswith("Ситуация")
+    assert "<b>Общая картина</b>" in html
