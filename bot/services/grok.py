@@ -14,6 +14,28 @@ class GrokError(RuntimeError):
     """Grok недоступен или вернул некорректный ответ."""
 
 
+def extract_text(data: dict) -> str:
+    """Достаёт ответ модели, объясняя пустой результат вместо глухого «пусто».
+
+    Рассуждающие модели тратят часть лимита на внутренние размышления: если лимит мал,
+    видимый текст оказывается пустым, а причина остановки — length.
+    """
+    try:
+        choice = data["choices"][0]
+        text = (choice["message"]["content"] or "").strip()
+    except (KeyError, IndexError, TypeError) as exc:
+        raise GrokError(f"неожиданный формат ответа: {str(data)[:200]}") from exc
+
+    if text:
+        return text
+    if choice.get("finish_reason") == "length":
+        raise GrokError(
+            "ответ не поместился в лимит токенов — модель потратила его на размышления; "
+            "увеличьте GROK_MAX_TOKENS"
+        )
+    raise GrokError("модель вернула пустой ответ")
+
+
 class GrokClient:
     def __init__(
         self,
@@ -80,11 +102,7 @@ class GrokClient:
                 if response.status_code >= 500 or response.status_code == 429:
                     raise GrokError(f"Grok ответил {response.status_code}")
                 response.raise_for_status()
-                data = response.json()
-                text = (data["choices"][0]["message"]["content"] or "").strip()
-                if not text:
-                    raise GrokError("Grok вернул пустой ответ")
-                return text
+                return extract_text(response.json())
             except (httpx.HTTPError, GrokError, KeyError, IndexError, ValueError) as exc:
                 last_error = exc
                 logger.warning("Запрос к Grok не удался (попытка %s): %s", attempt + 1, exc)

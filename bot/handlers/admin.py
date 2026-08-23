@@ -207,7 +207,10 @@ async def cmd_diag(message: Message, settings: Settings, interpreter: Interprete
 
     try:
         reply = await interpreter.grok.complete(
-            "Отвечай одним словом.", "Скажи: готово", max_tokens=16
+            # с запасом: рассуждающие модели часть лимита тратят на размышления
+            "Отвечай одним словом.",
+            "Скажи: готово",
+            max_tokens=200,
         )
         lines[-1] = f"Ключ: ✅ работает (ответ модели: «{texts.esc(reply[:40])}»)"
     except GrokError as exc:

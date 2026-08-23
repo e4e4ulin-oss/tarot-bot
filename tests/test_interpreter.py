@@ -121,3 +121,19 @@ def test_thinking_block_never_reaches_the_reader():
     assert "User asks" not in html
     assert html.startswith("Ситуация")
     assert "<b>Общая картина</b>" in html
+
+
+def test_empty_answer_explains_the_token_limit():
+    """Рассуждающая модель может истратить лимит на размышления — это надо объяснить."""
+    from bot.services.grok import extract_text
+
+    assert extract_text({"choices": [{"message": {"content": " готово "}}]}) == "готово"
+
+    with pytest.raises(GrokError, match="GROK_MAX_TOKENS"):
+        extract_text({"choices": [{"message": {"content": ""}, "finish_reason": "length"}]})
+
+    with pytest.raises(GrokError, match="пустой ответ"):
+        extract_text({"choices": [{"message": {"content": ""}, "finish_reason": "stop"}]})
+
+    with pytest.raises(GrokError, match="формат"):
+        extract_text({"error": "boom"})
