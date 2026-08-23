@@ -161,6 +161,28 @@ async def cb_submit(
     await call.answer()
 
 
+async def notify_admins(
+    bot: Bot, settings: Settings, text: str, reply_markup: object | None = None
+) -> Message | None:
+    """Шлёт сообщение всем, кто ведёт заявки. Возвращает первое доставленное.
+
+    Кто-то мог не запустить бота или заблокировать его — это не повод терять заявку
+    для остальных, поэтому каждая отправка отдельная.
+    """
+    if not settings.notify_chat_ids:
+        logger.warning("Некому отправлять: не заданы ADMIN_CHAT_ID и ADMIN_IDS")
+        return None
+
+    delivered: Message | None = None
+    for chat_id in settings.notify_chat_ids:
+        try:
+            sent = await bot.send_message(chat_id, text, reply_markup=reply_markup)
+            delivered = delivered or sent
+        except TelegramAPIError as exc:
+            logger.warning("Не доставлено в чат %s: %s", chat_id, exc)
+    return delivered
+
+
 async def notify_admin_new_order(
     bot: Bot,
     settings: Settings,
@@ -169,30 +191,25 @@ async def notify_admin_new_order(
     full_name: str | None,
     username: str | None,
 ) -> None:
-    if not settings.admin_chat_id:
-        logger.warning("ADMIN_CHAT_ID не задан — заявка №%s никуда не отправлена", order.id)
-        return
-
     user_line = texts.esc(full_name or "без имени")
     if username:
         user_line += f" (@{texts.esc(username)})"
 
-    try:
-        sent = await bot.send_message(
-            settings.admin_chat_id,
-            texts.ADMIN_NEW_ORDER.format(
-                order_id=order.id,
-                user=user_line,
-                user_id=order.user_id,
-                topic=texts.esc(texts.topic_label(order.topic)),
-                contact=texts.esc(order.contact) or "—",
-                question=texts.esc(order.question),
-            ),
-            reply_markup=admin_order_menu(order.id),
-        )
+    sent = await notify_admins(
+        bot,
+        settings,
+        texts.ADMIN_NEW_ORDER.format(
+            order_id=order.id,
+            user=user_line,
+            user_id=order.user_id,
+            topic=texts.esc(texts.topic_label(order.topic)),
+            contact=texts.esc(order.contact) or "—",
+            question=texts.esc(order.question),
+        ),
+        reply_markup=admin_order_menu(order.id),
+    )
+    if sent is not None:
         await repo.set_admin_message(order, sent.message_id)
-    except TelegramAPIError:
-        logger.exception("Не удалось отправить заявку №%s в админ-чат", order.id)
 
 
 @router.callback_query(F.data.startswith("order:cancel:"))
@@ -211,14 +228,7 @@ async def cb_cancel_order(call: CallbackQuery, repo: Repo, settings: Settings, b
         )
     await call.answer()
 
-    if settings.admin_chat_id:
-        try:
-            await bot.send_message(
-                settings.admin_chat_id,
-                f"↩️ Клиент отменил заявку №{order.id}.",
-            )
-        except TelegramAPIError:  # pragma: no cover
-            logger.exception("Не удалось уведомить админ-чат об отмене №%s", order.id)
+    await notify_admins(bot, settings, f"↩️ Клиент отменил заявку №{order.id}.")
 
 
 @router.callback_query(F.data.startswith("order:followup:"))
@@ -243,24 +253,17 @@ async def on_followup(
         await message.answer(texts.ERROR)
         return
 
-    if settings.admin_chat_id:
-        user_line = texts.esc(message.from_user.full_name)
-        if message.from_user.username:
-            user_line += f" (@{texts.esc(message.from_user.username)})"
-        try:
-            await bot.send_message(
-                settings.admin_chat_id,
-                texts.ADMIN_FOLLOWUP.format(
-                    order_id=order.id,
-                    user=user_line,
-                    text=texts.esc(message.text or ""),
-                ),
-                reply_markup=admin_order_menu(order.id, taken=True),
-            )
-        except TelegramAPIError:  # pragma: no cover
-            logger.exception("Не удалось передать уточнение по заявке №%s", order.id)
-            await message.answer(texts.ERROR)
-            return
+    user_line = texts.esc(message.from_user.full_name)
+    if message.from_user.username:
+        user_line += f" (@{texts.esc(message.from_user.username)})"
+    await notify_admins(
+        bot,
+        settings,
+        texts.ADMIN_FOLLOWUP.format(
+            order_id=order.id, user=user_line, text=texts.esc(message.text or "")
+        ),
+        reply_markup=admin_order_menu(order.id, taken=True),
+    )
 
     await message.answer(
         texts.AUTHOR_FOLLOWUP_SENT.format(author=settings.author_name),

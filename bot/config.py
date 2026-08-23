@@ -89,6 +89,15 @@ class Settings(BaseSettings):
         return value
 
     @property
+    def notify_chat_ids(self) -> list[int]:
+        """Кому уходят заявки: админ-чат и все, кто может на них отвечать."""
+        ids: list[int] = []
+        for chat_id in [self.admin_chat_id, *self.admin_ids]:
+            if chat_id and chat_id not in ids:
+                ids.append(chat_id)
+        return ids
+
+    @property
     def ai_enabled(self) -> bool:
         return bool(self.ai_api_key)
 

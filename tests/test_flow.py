@@ -376,3 +376,22 @@ async def test_reading_sends_card_images_and_caches_file_ids(env):
 
     sources = [item.media for item in session.methods("SendMediaGroup")[0].media]
     assert sources == [cached[card_id]], sources
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_order_reaches_every_admin(env):
+    """Заявка приходит и в админ-чат, и в личку каждого, кто ведёт разборы."""
+    dp, bot, session, factory = env
+    chat = 1009
+
+    await feed(dp, bot, make_callback("menu:author", chat_id=chat), 1)
+    await feed(dp, bot, make_callback("topic:work", chat_id=chat), 2)
+    await feed(dp, bot, make_message("Что с работой?", chat_id=chat), 3)
+    await feed(dp, bot, make_callback("order:nocontact", chat_id=chat), 4)
+    session.clear()
+    await feed(dp, bot, make_callback("order:submit", chat_id=chat), 5)
+
+    recipients = [
+        call.chat_id for call in session.methods("SendMessage") if "Заявка" in (call.text or "")
+    ]
+    assert recipients == [ADMIN_CHAT_ID, ADMIN_ID], recipients

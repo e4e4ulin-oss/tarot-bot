@@ -107,3 +107,17 @@ def test_ai_provider_accepts_both_env_names():
     assert legacy.ai_api_key == "k2"
     assert legacy.ai_model == "grok-4"
     assert legacy.ai_base_url == "https://api.x.ai/v1"
+
+
+def test_orders_go_to_everyone_who_handles_them():
+    """Заявка должна доходить и до админ-чата, и до каждого, кто может отвечать."""
+    settings = Settings(BOT_TOKEN="t", ADMIN_CHAT_ID=-100500, ADMIN_IDS="10,20")
+    assert settings.notify_chat_ids == [-100500, 10, 20]
+
+    # админ-чат совпадает с личкой автора — дубля быть не должно
+    single = Settings(BOT_TOKEN="t", ADMIN_CHAT_ID=10, ADMIN_IDS="10")
+    assert single.notify_chat_ids == [10]
+
+    # ничего не задано — рассылать некому
+    empty = Settings(BOT_TOKEN="t", ADMIN_CHAT_ID="", ADMIN_IDS="")
+    assert empty.notify_chat_ids == []
