@@ -24,7 +24,8 @@ class Settings(BaseSettings):
     admin_ids: Annotated[list[int], NoDecode] = Field(default_factory=list, alias="ADMIN_IDS")
 
     # --- Автор ---
-    author_name: str = Field(default="Анастасия", alias="AUTHOR_NAME")
+    # Как бот называет того, кто делает авторские разборы: имя или просто «таролог»
+    author_name: str = Field(default="таролог", alias="AUTHOR_NAME")
     author_price_text: str = Field(default="", alias="AUTHOR_PRICE_TEXT")
 
     # --- Языковая модель ---

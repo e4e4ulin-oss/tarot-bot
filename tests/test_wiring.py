@@ -30,7 +30,7 @@ def test_router_order_keeps_fallback_last():
 
 
 def test_main_menu_has_both_modes():
-    markup = main_menu("Анастасия")
+    markup = main_menu("таролог")
     data = [button.callback_data for row in markup.inline_keyboard for button in row]
     assert "menu:auto" in data
     assert "menu:author" in data
@@ -64,3 +64,22 @@ async def test_is_admin_filter():
     assert await check(_message(chat_id=10, user_id=10), settings) is True
     assert await check(_message(chat_id=-100500, user_id=777), settings) is True
     assert await check(_message(chat_id=777, user_id=777), settings) is False
+
+
+def test_author_name_fits_any_value():
+    """Имя автора подставляется в именительном падеже — подойдёт любое значение."""
+    from bot import texts
+
+    for name in ("таролог", "Мария", "Анна Петрова"):
+        for template in (
+            texts.START,
+            texts.AUTHOR_INTRO,
+            texts.AUTHOR_SENT,
+            texts.AUTHOR_ANSWER_HEADER,
+            texts.AUTHOR_FOLLOWUP_ASK,
+            texts.AUTHOR_FOLLOWUP_SENT,
+            texts.AUTHOR_DECLINED,
+        ):
+            rendered = template.format(author=name, order_id=1)
+            assert f"от {name}" not in rendered, (name, rendered[:60])
+            assert f"у {name}" not in rendered, (name, rendered[:60])

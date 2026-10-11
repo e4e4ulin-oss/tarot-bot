@@ -252,7 +252,7 @@ async def test_author_order_flow_reaches_admin_and_back(env):
     assert order.status is OrderStatus.NEW
     assert order.admin_message_id is not None
 
-    # Анастасия отвечает из админ-чата
+    # автор отвечает из админ-чата
     session.clear()
     await feed(
         dp,

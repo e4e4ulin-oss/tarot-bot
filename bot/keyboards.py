@@ -12,7 +12,7 @@ from .texts import TOPICS
 def main_menu(author_name: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="🔮 Авто-расклад", callback_data="menu:auto")
-    builder.button(text=f"✍️ Авторский разбор от {author_name}", callback_data="menu:author")
+    builder.button(text="✍️ Авторский разбор", callback_data="menu:author")
     builder.button(text="📜 Мои расклады", callback_data="menu:history")
     builder.button(text="ℹ️ О раскладах", callback_data="menu:about")
     builder.adjust(1)
@@ -42,7 +42,7 @@ def question_menu(spread_key: str, *, allow_skip: bool) -> InlineKeyboardMarkup:
 def after_reading_menu(author_name: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="🔮 Ещё расклад", callback_data="menu:auto")
-    builder.button(text=f"✍️ Разбор от {author_name}", callback_data="menu:author")
+    builder.button(text="✍️ Авторский разбор", callback_data="menu:author")
     builder.button(text="‹ Меню", callback_data="menu:main")
     builder.adjust(1)
     return builder.as_markup()
