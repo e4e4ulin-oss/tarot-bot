@@ -40,7 +40,9 @@ class Settings(BaseSettings):
     # Общий предел ожидания: сколько бот вообще готов ждать разбор, включая повторы
     grok_deadline: float = Field(default=45.0, alias="GROK_DEADLINE")
     grok_retries: int = Field(default=1, alias="GROK_RETRIES")
-    grok_max_tokens: int = Field(default=1200, alias="GROK_MAX_TOKENS")
+    # Рассуждающие модели (gpt-oss, Gemini 2.5, Qwen) часть лимита тратят на
+    # размышления: при 1200 разбор обрывается на полуслове
+    grok_max_tokens: int = Field(default=3000, alias="GROK_MAX_TOKENS")
     grok_temperature: float = Field(default=0.8, alias="GROK_TEMPERATURE")
 
     # --- Хранилище ---
