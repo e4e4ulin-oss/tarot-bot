@@ -84,6 +84,15 @@ if [ -z "$PROJECT_DIR" ]; then
 
   if [ -d "$TARGET_DIR/.git" ]; then
     log "Обновляю код в $TARGET_DIR…"
+    # В режиме --systemd каталог принадлежит служебному пользователю tarot,
+    # а git работает от root и отказывается трогать чужой репозиторий
+    # («dubious ownership»). Разрешаем явно — только этот каталог.
+    # Через -c или переменные окружения safe.directory не работает: git читает
+    # его лишь из системного/глобального конфига.
+    if ! $SUDO git config --global --get-all safe.directory 2>/dev/null \
+         | grep -qxF "$TARGET_DIR"; then
+      $SUDO git config --global --add safe.directory "$TARGET_DIR"
+    fi
     $SUDO git -C "$TARGET_DIR" fetch --depth 1 origin main
     $SUDO git -C "$TARGET_DIR" reset --hard origin/main
   else
