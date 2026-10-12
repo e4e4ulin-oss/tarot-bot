@@ -51,6 +51,13 @@ class Settings(BaseSettings):
     grok_max_tokens: int = Field(default=3000, alias="GROK_MAX_TOKENS")
     grok_temperature: float = Field(default=0.8, alias="GROK_TEMPERATURE")
 
+    # --- Карта дня ---
+    daily_card_enabled: bool = Field(default=True, alias="DAILY_CARD_ENABLED")
+    # Час утренней рассылки в рабочем часовом поясе
+    daily_card_hour: int = Field(default=9, alias="DAILY_CARD_HOUR")
+    # Сколько сообщений отправлять за один проход: Telegram не любит очереди в тысячи
+    daily_card_batch: int = Field(default=25, alias="DAILY_CARD_BATCH")
+
     # --- Рабочее время ---
     # Срок ответа на авторский разбор считается только в эти часы, ПН–ПТ.
     work_start_hour: int = Field(default=9, alias="WORK_START_HOUR")

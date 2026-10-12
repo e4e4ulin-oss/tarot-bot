@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import CardImage, Event, Order, OrderStatus, Reading, ReadingMode, User, utcnow
+from .models import (
+    CardImage,
+    DailyCard,
+    Event,
+    Order,
+    OrderStatus,
+    Reading,
+    ReadingMode,
+    User,
+    utcnow,
+)
 
 
 class Repo:
@@ -160,6 +170,62 @@ class Repo:
         return order
 
     # --- Статистика для админа ------------------------------------------
+    # --- Карта дня --------------------------------------------------------
+    async def daily_card(self, user_id: int, day: date) -> DailyCard | None:
+        return await self.session.scalar(
+            select(DailyCard).where(DailyCard.user_id == user_id, DailyCard.day == day)
+        )
+
+    async def save_daily_card(
+        self, user_id: int, day: date, card_id: str, reversed_: bool, *, delivered: bool = False
+    ) -> DailyCard:
+        card = DailyCard(
+            user_id=user_id,
+            day=day,
+            card_id=card_id,
+            reversed=reversed_,
+            delivered=delivered,
+        )
+        self.session.add(card)
+        await self.session.commit()
+        return card
+
+    async def mark_daily_delivered(self, card: DailyCard) -> None:
+        card.delivered = True
+        await self.session.commit()
+
+    async def set_daily_subscription(self, user_id: int, subscribed: bool) -> None:
+        await self.session.execute(
+            update(User).where(User.id == user_id).values(daily_subscribed=subscribed)
+        )
+        await self.session.commit()
+
+    async def is_daily_subscribed(self, user_id: int) -> bool:
+        return bool(
+            await self.session.scalar(select(User.daily_subscribed).where(User.id == user_id))
+        )
+
+    async def daily_subscribers_pending(self, day: date, limit: int = 50) -> list[int]:
+        """Подписчики, которым сегодняшнюю карту ещё не отправляли."""
+        already = select(DailyCard.user_id).where(
+            DailyCard.day == day, DailyCard.delivered.is_(True)
+        )
+        rows = await self.session.scalars(
+            select(User.id)
+            .where(User.daily_subscribed.is_(True), User.id.not_in(already))
+            .order_by(User.id)
+            .limit(limit)
+        )
+        return list(rows)
+
+    async def count_daily_subscribers(self) -> int:
+        return int(
+            await self.session.scalar(
+                select(func.count()).select_from(User).where(User.daily_subscribed.is_(True))
+            )
+            or 0
+        )
+
     # --- Воронка ---------------------------------------------------------
     async def log_event(self, user_id: int, name: str, detail: str | None = None) -> None:
         """Отмечает шаг воронки. Ошибка здесь не должна ломать сценарий."""

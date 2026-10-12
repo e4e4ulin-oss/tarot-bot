@@ -372,7 +372,7 @@ async def test_reading_sends_card_images_and_caches_file_ids(env):
 
     session.clear()
     async with factory() as db:
-        await send_card_images(anchor, drawn, Repo(db), dp["settings"])
+        await send_card_images(bot, anchor.chat.id, drawn, Repo(db), dp["settings"])
 
     sources = [item.media for item in session.methods("SendMediaGroup")[0].media]
     assert sources == [cached[card_id]], sources
@@ -783,3 +783,56 @@ async def test_stats_accepts_a_period(env):
     await feed(dp, bot, make_message("/stats 0", chat_id=ADMIN_CHAT_ID, user_id=ADMIN_ID), 1)
 
     assert any("всё время" in text for text in session.texts())
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_daily_card_opens_from_the_menu_and_keeps_its_card(env):
+    dp, bot, session, _ = env
+    chat = 1501
+
+    await feed(dp, bot, make_callback("daily:open", chat_id=chat), 1)
+    first = session.texts("EditMessageText")[-1]
+
+    session.clear()
+    await feed(dp, bot, make_callback("daily:open", chat_id=chat), 2)
+    again = session.texts("EditMessageText")[-1]
+
+    assert "Карта дня" in first
+    # Название карты — первая строка после заголовка; оно не должно поменяться
+    assert first.split("\n")[2] == again.split("\n")[2]
+    assert "уже вытянута" in again
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_subscription_turns_on_and_off(env):
+    dp, bot, session, factory = env
+    chat = 1502
+
+    await feed(dp, bot, make_callback("daily:open", chat_id=chat), 1)
+    await feed(dp, bot, make_callback("daily:on", chat_id=chat), 2)
+    async with factory() as db:
+        assert await Repo(db).is_daily_subscribed(chat) is True
+    assert any("каждое утро" in text for text in session.texts())
+
+    session.clear()
+    await feed(dp, bot, make_callback("daily:off", chat_id=chat), 3)
+    async with factory() as db:
+        assert await Repo(db).is_daily_subscribed(chat) is False
+    assert any("Больше не присылаю" in text for text in session.texts())
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_main_menu_offers_the_daily_card(env):
+    dp, bot, session, _ = env
+
+    session.clear()
+    await feed(dp, bot, make_message("/start", chat_id=1503), 1)
+
+    buttons = [
+        button.callback_data
+        for call in session.methods("SendMessage")
+        if call.reply_markup
+        for row in call.reply_markup.inline_keyboard
+        for button in row
+    ]
+    assert "daily:open" in buttons

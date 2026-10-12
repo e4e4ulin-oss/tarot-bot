@@ -23,6 +23,7 @@ def test_router_order_keeps_fallback_last():
     assert [router.name for router in ROUTERS] == [
         "common",
         "admin",
+        "daily",
         "auto",
         "author",
         "fallback",

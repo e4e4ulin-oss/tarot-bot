@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("orders", "tier", "VARCHAR(16)"),
     ("orders", "followups_used", "INTEGER DEFAULT 0 NOT NULL"),
+    ("users", "daily_subscribed", "BOOLEAN DEFAULT 0 NOT NULL"),
 )
 
 

@@ -16,6 +16,11 @@ TIER_CHOSEN: Final = "tier_chosen"
 ORDER_SENT: Final = "order_sent"
 ORDER_ANSWERED: Final = "order_answered"
 
+# Карта дня живёт рядом с воронкой, но в неё не входит: это не путь к заказу
+DAILY_OPEN: Final = "daily_open"
+DAILY_SUBSCRIBED: Final = "daily_subscribed"
+DAILY_SENT: Final = "daily_sent"
+
 # Порядок важен: по нему считаются переходы между шагами.
 FUNNEL: Final[tuple[tuple[str, str], ...]] = (
     (START, "Зашли в бота"),

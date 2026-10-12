@@ -280,6 +280,7 @@ async def cmd_stats(
             period=period,
             funnel=_funnel_table(steps),
             orders_by_tier=tiers_block,
+            daily_subscribers=await repo.count_daily_subscribers(),
             **await repo.stats(),
         )
     )

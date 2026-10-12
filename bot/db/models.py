@@ -3,9 +3,20 @@
 from __future__ import annotations
 
 import enum
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Date,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
@@ -47,6 +58,10 @@ class User(Base):
     username: Mapped[str | None] = mapped_column(String(64))
     first_name: Mapped[str | None] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # Подписка на утреннюю карту дня
+    daily_subscribed: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0", index=True
+    )
 
     readings: Mapped[list[Reading]] = relationship(back_populates="user")
     orders: Mapped[list[Order]] = relationship(back_populates="user")
@@ -139,3 +154,23 @@ class Event(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, index=True
     )
+
+
+class DailyCard(Base):
+    """Карта дня: одна на человека в сутки.
+
+    Хранится, чтобы карта не менялась при каждом открытии — иначе «карта дня»
+    превращается в кнопку «вытянуть ещё раз».
+    """
+
+    __tablename__ = "daily_cards"
+    __table_args__ = (UniqueConstraint("user_id", "day", name="uq_daily_card_user_day"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    day: Mapped[date] = mapped_column(Date, index=True)
+    card_id: Mapped[str] = mapped_column(String(32))
+    reversed: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Отправлена ли она утренней рассылкой (а не открыта человеком самому)
+    delivered: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

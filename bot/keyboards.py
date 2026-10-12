@@ -14,6 +14,7 @@ from .tiers import Tier
 
 def main_menu(author_name: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+    builder.button(text="🌅 Карта дня", callback_data="daily:open")
     builder.button(text="🔮 Авто-расклад", callback_data="menu:auto")
     builder.button(text="✍️ Авторский разбор", callback_data="menu:author")
     builder.button(text="📜 Мои расклады", callback_data="menu:history")
@@ -46,6 +47,18 @@ def after_reading_menu(author_name: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="🔮 Ещё расклад", callback_data="menu:auto")
     builder.button(text="✍️ Авторский разбор", callback_data="menu:author")
+    builder.button(text="‹ Меню", callback_data="menu:main")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def daily_card_menu(*, subscribed: bool) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    if subscribed:
+        builder.button(text="🔕 Не присылать каждое утро", callback_data="daily:off")
+    else:
+        builder.button(text="🔔 Присылать каждое утро", callback_data="daily:on")
+    builder.button(text="🔮 Сделать расклад", callback_data="menu:auto")
     builder.button(text="‹ Меню", callback_data="menu:main")
     builder.adjust(1)
     return builder.as_markup()

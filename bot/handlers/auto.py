@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, FSInputFile, InputMediaPhoto, Message
@@ -101,7 +101,7 @@ async def on_non_text_question(message: Message) -> None:
 
 
 async def send_card_images(
-    message: Message, drawn: list[DrawnCard], repo: Repo, settings: Settings
+    bot: Bot, chat_id: int, drawn: list[DrawnCard], repo: Repo, settings: Settings
 ) -> None:
     """Показывает сами карты. Своя картинка приоритетнее скана, ссылка — на крайний случай.
 
@@ -123,7 +123,7 @@ async def send_card_images(
         media.append(InputMediaPhoto(media=source, caption=item.title))
 
     try:
-        sent = await message.answer_media_group(media)
+        sent = await bot.send_media_group(chat_id, media)
     except TelegramAPIError as exc:
         logger.warning("Картинки карт отправить не удалось: %s", exc)
         return
@@ -160,7 +160,7 @@ async def run_reading(
         reversed_chance=settings.reversed_chance,
     )
 
-    await send_card_images(message, drawn, repo, settings)
+    await send_card_images(message.bot, message.chat.id, drawn, repo, settings)
     cards_message = await message.answer(format_cards(spread, drawn, question))
     status = await message.answer(texts.INTERPRETING)
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import suppress
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -17,11 +18,13 @@ from .db import create_engine, create_session_factory, init_models
 from .handlers import build_router
 from .middlewares import DbSessionMiddleware, ThrottlingMiddleware, UserMiddleware
 from .services import GrokClient, Interpreter, ServerOps
+from .services.daily import DailyCards
 
 logger = logging.getLogger(__name__)
 
 COMMANDS = [
     BotCommand(command="start", description="Меню"),
+    BotCommand(command="daily", description="Карта дня"),
     BotCommand(command="help", description="Как пользоваться"),
     BotCommand(command="cancel", description="Отменить текущее действие"),
 ]
@@ -91,12 +94,20 @@ async def main() -> None:
     )
     dp = build_dispatcher(settings, interpreter, session_factory)
 
+    daily: asyncio.Task | None = None
     try:
         await bot.set_my_commands(COMMANDS)
         await bot.delete_webhook(drop_pending_updates=True)
+        if settings.daily_card_enabled:
+            daily = asyncio.create_task(DailyCards(bot, settings, session_factory).run())
+            logger.info("Карта дня: рассылка в %s:00", settings.daily_card_hour)
         logger.info("Бот запущен")
         await dp.start_polling(bot)
     finally:
+        if daily is not None:
+            daily.cancel()
+            with suppress(asyncio.CancelledError):
+                await daily
         await grok.close()
         await bot.session.close()
         await engine.dispose()
