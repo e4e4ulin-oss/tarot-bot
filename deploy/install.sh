@@ -25,6 +25,7 @@
 #   --admin-chat ЗНАЧЕНИЕ   чат, куда падают заявки на авторский разбор
 #   --admin-ids ЗНАЧЕНИЕ    id тех, кто отвечает на заявки (через запятую)
 #   --systemd               без Docker: venv + служба systemd
+#   --no-autoupdate         не подтягивать правки из GitHub по таймеру
 #   --dir ПУТЬ              куда установить (по умолчанию /opt/tarot-bot)
 set -euo pipefail
 
@@ -38,12 +39,14 @@ ARG_ADMIN_CHAT=""
 ARG_ADMIN_IDS=""
 MODE="docker"
 SERVICE_NAME="tarot-bot"
+AUTOUPDATE="yes"
 
 log() { printf '\n\033[1m→ %s\033[0m\n' "$1"; }
 fail() { printf '\n\033[31m%s\033[0m\n' "$1" >&2; exit 1; }
 
 usage() {
-  sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'
+  # Вся шапка до первой строки кода — чтобы справка не отставала от скрипта.
+  awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"
 }
 
 while [ $# -gt 0 ]; do
@@ -51,6 +54,8 @@ while [ $# -gt 0 ]; do
     -t|--token) ARG_TOKEN="${2:-}"; shift 2 ;;
     --ai|--xai|--grok) ARG_AI_KEY="${2:-}"; shift 2 ;;
     --systemd|--no-docker) MODE="systemd"; shift ;;
+    --no-autoupdate) AUTOUPDATE="no"; shift ;;
+    --autoupdate) AUTOUPDATE="yes"; shift ;;
     --admin-chat) ARG_ADMIN_CHAT="${2:-}"; shift 2 ;;
     --admin-ids) ARG_ADMIN_IDS="${2:-}"; shift 2 ;;
     --dir) TARGET_DIR="${2:-}"; shift 2 ;;
@@ -226,6 +231,47 @@ UNIT
   $SUDO systemctl enable --now "$SERVICE_NAME"
   $SUDO systemctl restart "$SERVICE_NAME"
 
+  if [ "$AUTOUPDATE" = "yes" ]; then
+    log "Включаю автообновление из GitHub…"
+    # Копия вне репозитория: обновление кода не должно перезаписывать скрипт,
+    # пока тот работает. Заодно получается короткая команда tarot-update.
+    $SUDO install -m 755 "$PROJECT_DIR/deploy/autoupdate.sh" /usr/local/bin/tarot-update
+
+    $SUDO tee "/etc/systemd/system/$SERVICE_NAME-update.service" >/dev/null <<UNIT
+[Unit]
+Description=Tarot bot: подтянуть свежий код из GitHub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=TAROT_SERVICE=$SERVICE_NAME
+ExecStart=/usr/local/bin/tarot-update $PROJECT_DIR
+UNIT
+
+    $SUDO tee "/etc/systemd/system/$SERVICE_NAME-update.timer" >/dev/null <<UNIT
+[Unit]
+Description=Tarot bot: проверять обновления каждые 5 минут
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+Unit=$SERVICE_NAME-update.service
+
+[Install]
+WantedBy=timers.target
+UNIT
+
+    $SUDO systemctl daemon-reload
+    $SUDO systemctl enable --now "$SERVICE_NAME-update.timer"
+  elif [ -f "/etc/systemd/system/$SERVICE_NAME-update.timer" ]; then
+    log "Отключаю автообновление…"
+    $SUDO systemctl disable --now "$SERVICE_NAME-update.timer" || true
+    $SUDO rm -f "/etc/systemd/system/$SERVICE_NAME-update.timer" \
+                "/etc/systemd/system/$SERVICE_NAME-update.service"
+    $SUDO systemctl daemon-reload
+  fi
+
   sleep 3
   log "Состояние:"
   $SUDO systemctl --no-pager --lines=0 status "$SERVICE_NAME" | head -5
@@ -245,6 +291,19 @@ if [ "$MODE" = "systemd" ]; then
   RESTART_CMD="systemctl restart $SERVICE_NAME"
 else
   RESTART_CMD="docker compose restart"
+fi
+
+if [ "$AUTOUPDATE" = "yes" ] && [ "$MODE" = "systemd" ]; then
+  AUTOUPDATE_HINT="
+  tarot-update                   подтянуть правки из GitHub сейчас же
+
+Правки из GitHub приезжают сами: таймер $SERVICE_NAME-update проверяет ветку main
+каждые 5 минут. Код с синтаксической ошибкой не применяется — бот продолжает
+работать на прежней версии. Отключить: повторный запуск установки с --no-autoupdate."
+else
+  AUTOUPDATE_HINT="
+
+Автообновление выключено — обновляйте повторным запуском этой же команды установки."
 fi
 
 if [ -n "$(get_env ADMIN_CHAT_ID)" ] && [ -n "$(get_env ADMIN_IDS)" ]; then
@@ -268,8 +327,7 @@ cat <<INFO
 Полезные команды:
   journalctl -u $SERVICE_NAME -f     логи бота
   systemctl restart $SERVICE_NAME    перезапустить после правки .env
-  systemctl stop $SERVICE_NAME       остановить
-  обновление до свежей версии — повторный запуск этой же команды установки
+  systemctl stop $SERVICE_NAME       остановить$AUTOUPDATE_HINT
 
 INFO
 else
