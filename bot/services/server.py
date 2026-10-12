@@ -23,6 +23,10 @@ UPDATE_APPLIED = 10
 NOT_AVAILABLE = 127
 TIMED_OUT = 124
 
+# sudo предупреждает об этом, когда имя хоста не прописано в /etc/hosts. На работу
+# не влияет, но в ответе бота читается как ошибка — поэтому в чат не попадает.
+NOISE_PREFIXES = ("sudo: unable to resolve host",)
+
 LOGS_DEFAULT = 40
 LOGS_MIN = 5
 LOGS_MAX = 200
@@ -41,6 +45,11 @@ class CommandResult:
     def unavailable(self) -> bool:
         """Команды нет, прав нет или она не ответила — чинится на сервере."""
         return self.code in (NOT_AVAILABLE, TIMED_OUT)
+
+
+def _without_noise(output: str) -> str:
+    kept = [line for line in output.splitlines() if not line.startswith(NOISE_PREFIXES)]
+    return "\n".join(kept).strip()
 
 
 class ServerOps:
@@ -76,7 +85,7 @@ class ServerOps:
             return CommandResult(TIMED_OUT, f"команда не ответила за {self.timeout:.0f} с")
 
         code = proc.returncode if proc.returncode is not None else 0
-        return CommandResult(code, stdout.decode("utf-8", "replace").strip())
+        return CommandResult(code, _without_noise(stdout.decode("utf-8", "replace")))
 
     async def logs(self, lines: int = LOGS_DEFAULT) -> CommandResult:
         count = max(LOGS_MIN, min(LOGS_MAX, lines))

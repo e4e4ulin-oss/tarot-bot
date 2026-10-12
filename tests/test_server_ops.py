@@ -12,6 +12,7 @@ from bot.services.server import (
     UPDATE_APPLIED,
     CommandResult,
     ServerOps,
+    _without_noise,
 )
 
 
@@ -101,3 +102,27 @@ async def test_hanging_command_is_cut_off():
     assert result.code == TIMED_OUT
     assert result.unavailable
     assert "не ответила" in result.output
+
+
+def test_sudo_hostname_warning_does_not_reach_the_chat():
+    """Предупреждение sudo про /etc/hosts читается как ошибка, а ошибкой не является."""
+    output = "sudo: unable to resolve host UK82709: Name or service not known\nуже свежая версия"
+
+    assert _without_noise(output) == "уже свежая версия"
+
+
+def test_real_errors_survive_the_cleanup():
+    assert _without_noise("sudo: a password is required") == "sudo: a password is required"
+
+
+@pytest.mark.asyncio
+async def test_noise_is_stripped_from_a_real_run():
+    ops = ServerOps()
+
+    result = await ops._run(
+        "sh",
+        "-c",
+        "echo 'sudo: unable to resolve host UK82709: Name or service not known' >&2; echo готово",
+    )
+
+    assert result.output == "готово"
