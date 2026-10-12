@@ -889,7 +889,9 @@ async def test_reversed_card_is_sent_upside_down_and_cached_apart(env, monkeypat
 
     session.clear()
     async with factory() as db:
+        # Обе записи — чужие: прямую картинку этой карты мог закэшировать соседний тест
         await forget_cached_image(db, cache_key(card, True))
+        await forget_cached_image(db, cache_key(card, False))
         await send_card_images(bot, 1601, drawn, Repo(db), dp["settings"])
 
     media = session.methods("SendMediaGroup")[0].media
@@ -897,7 +899,7 @@ async def test_reversed_card_is_sent_upside_down_and_cached_apart(env, monkeypat
 
     async with factory() as db:
         cached = await Repo(db).card_file_ids([cache_key(card, True), cache_key(card, False)])
-    # Перевёрнутый файл сохранён отдельно и не подменяет прямой
+    # Отправка перевёрнутой карты заполняет только перевёрнутый ключ
     assert cache_key(card, True) in cached
     assert cache_key(card, False) not in cached
 
