@@ -15,10 +15,11 @@ from ..config import Settings
 from ..db import Order, OrderStatus, Repo
 from ..filters import IsAdmin
 from ..keyboards import admin_order_menu, back_to_menu, followup_menu
+from ..schedule import deadline, format_moment, now
 from ..services import UPDATE_APPLIED, GrokError, Interpreter, ServerOps
 from ..services.server import LOGS_DEFAULT, LOGS_MAX, LOGS_MIN
 from ..states import AdminFlow
-from ..tiers import followups_allowed, tier_label
+from ..tiers import find_tier, followups_allowed, tier_label
 from ..utils import fmt_date
 
 logger = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ def _order_id(data: str) -> int:
 
 
 @router.callback_query(F.data.startswith("adm:take:"))
-async def cb_take(call: CallbackQuery, repo: Repo) -> None:
+async def cb_take(call: CallbackQuery, repo: Repo, settings: Settings) -> None:
     order = await repo.get_order(_order_id(call.data))
     if order is None:
         await call.answer(texts.ERROR, show_alert=True)
@@ -48,6 +49,19 @@ async def cb_take(call: CallbackQuery, repo: Repo) -> None:
             )
         except TelegramBadRequest:  # pragma: no cover - разметка уже такая же
             pass
+
+        tier = find_tier(settings, order.tier)
+        if tier is not None:
+            moment = now(settings)
+            await call.message.answer(
+                texts.ADMIN_DEADLINE.format(
+                    order_id=order.id,
+                    deadline=format_moment(
+                        settings, deadline(settings, moment, tier.hours), moment
+                    ),
+                    tz=settings.work_timezone_label,
+                )
+            )
 
 
 @router.callback_query(F.data.startswith("adm:answer:"))

@@ -41,8 +41,8 @@ def test_every_level_says_what_is_included():
 @pytest.mark.parametrize(
     ("key", "expected"),
     [
-        ("short", "Лаконичный · 500 ₽"),
-        ("full", "Полный · 1000 ₽"),
+        ("short", "Лаконичный · 500 ₽ · до 1 часа"),
+        ("full", "Полный · 1000 ₽ · до 3 часов"),
         (None, "не выбран"),
         ("выдуманный", "не выбран"),
     ],
@@ -52,7 +52,7 @@ def test_label_carries_the_price(key, expected):
 
 
 def test_currency_is_configurable():
-    assert tier_label(settings(AUTHOR_CURRENCY="RUB"), "base") == "Базовый · 700 RUB"
+    assert tier_label(settings(AUTHOR_CURRENCY="RUB"), "base") == "Базовый · 700 RUB · до 2 часов"
 
 
 def test_each_level_promises_its_own_number_of_followups():

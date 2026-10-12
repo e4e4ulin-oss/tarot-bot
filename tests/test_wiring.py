@@ -80,6 +80,8 @@ def test_author_name_fits_any_value():
             texts.AUTHOR_FOLLOWUP_SENT,
             texts.AUTHOR_DECLINED,
         ):
-            rendered = template.format(author=name, order_id=1)
+            rendered = template.format(
+                author=name, order_id=1, deadline="2 часов", work_hours="", left="1 вопрос"
+            )
             assert f"от {name}" not in rendered, (name, rendered[:60])
             assert f"у {name}" not in rendered, (name, rendered[:60])

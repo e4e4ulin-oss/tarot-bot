@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .config import Settings
+from .texts import genitive_hours
 
 # Сколько уточнений даём заявке, оформленной до появления уровней.
 DEFAULT_FOLLOWUPS = 1
@@ -21,6 +22,8 @@ class Tier:
     price: int
     # Сколько уточняющих вопросов входит в уровень
     followups: int
+    # Срок ответа в часах — считается от оплаты, а не от заявки
+    hours: int
     # Одной строкой — для кнопки и сводки заявки
     summary: str
     # Построчно — для списка уровней перед выбором
@@ -29,17 +32,22 @@ class Tier:
     def price_label(self, currency: str = "₽") -> str:
         return f"{self.price} {currency}"
 
+    @property
+    def deadline_label(self) -> str:
+        return f"до {genitive_hours(self.hours)}"
+
     def button_label(self, currency: str = "₽") -> str:
         return f"{self.title} · {self.price_label(currency)}"
 
 
-# Тексты описывают объём работы, а не сроки: обещать срок бот не вправе.
-# Число уточнений здесь — то же, которое потом проверяется в коде.
-_TIERS: tuple[tuple[str, str, int, str, tuple[str, ...]], ...] = (
+# Числа здесь — те же, что бот потом проверяет и показывает: уточнения и срок
+# ответа в часах. Строку про срок собираем из числа, чтобы текст не разошёлся с ним.
+_TIERS: tuple[tuple[str, str, int, int, str, tuple[str, ...]], ...] = (
     (
         "short",
         "Лаконичный",
         0,
+        1,
         "три карты, короткий ответ по сути",
         (
             "расклад из трёх карт на ваш вопрос",
@@ -52,6 +60,7 @@ _TIERS: tuple[tuple[str, str, int, str, tuple[str, ...]], ...] = (
         "base",
         "Базовый",
         1,
+        2,
         "расклад под вопрос и развёрнутый разбор",
         (
             "расклад подбирается под вашу ситуацию",
@@ -62,6 +71,7 @@ _TIERS: tuple[tuple[str, str, int, str, tuple[str, ...]], ...] = (
     (
         "full",
         "Полный",
+        3,
         3,
         "большой расклад, разбор по блокам, рекомендации",
         (
@@ -90,10 +100,11 @@ def tiers(settings: Settings) -> tuple[Tier, ...]:
             title=title,
             price=_price(settings, key),
             followups=followups,
+            hours=hours,
             summary=summary,
-            includes=includes,
+            includes=(*includes, f"ответ в течение {genitive_hours(hours)} после оплаты"),
         )
-        for key, title, followups, summary, includes in _TIERS
+        for key, title, followups, hours, summary, includes in _TIERS
         if _price(settings, key) > 0
     )
 
@@ -115,4 +126,4 @@ def tier_label(settings: Settings, key: str | None) -> str:
     tier = find_tier(settings, key)
     if tier is None:
         return "не выбран"
-    return f"{tier.title} · {tier.price_label(settings.author_currency)}"
+    return f"{tier.title} · {tier.price_label(settings.author_currency)} · {tier.deadline_label}"

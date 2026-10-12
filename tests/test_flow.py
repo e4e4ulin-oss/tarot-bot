@@ -693,3 +693,45 @@ async def test_client_is_told_about_prepayment(env):
     await feed(dp, bot, make_callback("tier:base", chat_id=chat), 2)
 
     assert any("до начала работы" in text for text in session.texts("EditMessageText"))
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_order_outside_working_hours_says_when_the_clock_starts(env, monkeypatch):
+    """Заявка в ночь субботы не должна выглядеть как обещание ответить ночью."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    saturday_night = datetime(2026, 10, 17, 2, 0, tzinfo=ZoneInfo("Europe/Moscow"))
+    monkeypatch.setattr("bot.handlers.author.now", lambda settings: saturday_night)
+
+    dp, bot, session, _ = env
+    chat = 1301
+
+    await place_order(dp, bot, chat, "base")
+
+    sent = session.texts("EditMessageText")[-1]
+    assert "в течение 2 часов после оплаты" in sent
+    assert "Сейчас нерабочее время" in sent
+    assert "в понедельник в 9:00" in sent
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_author_sees_the_deadline_when_taking_an_order(env, monkeypatch):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    monday = datetime(2026, 10, 19, 10, 0, tzinfo=ZoneInfo("Europe/Moscow"))
+    monkeypatch.setattr("bot.handlers.admin.now", lambda settings: monday)
+
+    dp, bot, session, factory = env
+    chat = 1302
+    await place_order(dp, bot, chat, "full")
+    async with factory() as db:
+        order = await Repo(db).open_order_for_user(chat)
+
+    session.clear()
+    await feed(
+        dp, bot, make_callback(f"adm:take:{order.id}", chat_id=ADMIN_CHAT_ID, user_id=ADMIN_ID), 7
+    )
+
+    assert any("Ответить до: <b>сегодня в 13:00</b> (мск)" in text for text in session.texts())

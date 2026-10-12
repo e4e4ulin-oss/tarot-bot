@@ -84,7 +84,7 @@ AUTHOR_TIER_BLOCK = "<b>{title} · {price}</b>\n{includes}"
 AUTHOR_TIER_CHOSEN = (
     "<b>{title} · {price}</b>\n{includes}\n\n"
     "Оплата — до начала работы: когда заявку возьмут, вам напишут, как оплатить. "
-    "Разбор готовится после оплаты.\n\n"
+    "Разбор готовится после оплаты и приходит в течение {deadline}.\n\n"
 )
 
 AUTHOR_ASK_TOPIC = "Выберите тему разбора:"
@@ -104,6 +104,17 @@ AUTHOR_CONFIRM = (
 )
 
 AUTHOR_SENT = (
+    "✅ Заявка №{order_id} отправлена.\n\n"
+    "{author} получит её и напишет, как оплатить. "
+    "Разбор придёт в этот чат в течение {deadline} после оплаты.\n\n"
+    "{work_hours}"
+)
+
+AUTHOR_WORK_HOURS = "Работаю по будням, {hours} ({tz}) — срок считается в эти часы."
+
+AUTHOR_OFF_HOURS = " Сейчас нерабочее время, отсчёт начнётся {when}."
+
+AUTHOR_SENT_NO_TIER = (
     "✅ Заявка №{order_id} отправлена.\n\n"
     "{author} получит её и вернётся с разбором в этот чат. "
     "Ответ приходит не мгновенно — иногда это занимает время."
@@ -173,6 +184,8 @@ ADMIN_ANSWER_PROMPT = (
 ADMIN_ANSWER_SENT = "✅ Разбор по заявке №{order_id} отправлен."
 
 ADMIN_TAKEN = "Заявка №{order_id} — в работе у {admin}."
+
+ADMIN_DEADLINE = "⏳ Заявка №{order_id} в работе. Ответить до: <b>{deadline}</b> ({tz})."
 
 ADMIN_DECLINED = "Заявка №{order_id} отклонена."
 
@@ -264,6 +277,12 @@ def plural_followups(count: int) -> str:
         word = "вопроса"
     else:
         word = "вопросов"
+    return f"{count} {word}"
+
+
+def genitive_hours(count: int) -> str:
+    """Родительный падеж: «в течение 1 часа», «до 2 часов»."""
+    word = "часа" if count % 10 == 1 and count % 100 != 11 else "часов"
     return f"{count} {word}"
 
 

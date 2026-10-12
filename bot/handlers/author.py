@@ -23,6 +23,13 @@ from ..keyboards import (
     tiers_menu,
     topics_menu,
 )
+from ..schedule import (
+    format_moment,
+    is_working_time,
+    now,
+    start_of_work,
+    work_hours_label,
+)
 from ..states import AuthorFlow
 from ..tiers import Tier, find_tier, followups_allowed, tier_label, tiers
 from ..utils import fmt_date
@@ -87,7 +94,9 @@ async def cb_tier(call: CallbackQuery, state: FSMContext, settings: Settings) ->
         title=texts.esc(tier.title),
         price=texts.esc(tier.price_label(settings.author_currency)),
         includes="\n".join(f"• {texts.esc(line)}" for line in tier.includes),
+        deadline=texts.genitive_hours(tier.hours),
     )
+    chosen += _work_hours_note(settings) + "\n\n"
     if isinstance(call.message, Message):
         await call.message.edit_text(chosen + texts.AUTHOR_ASK_TOPIC, reply_markup=topics_menu())
     await call.answer()
@@ -194,11 +203,21 @@ async def cb_submit(
         bot, settings, repo, order, call.from_user.full_name, call.from_user.username
     )
 
-    if isinstance(call.message, Message):
-        await call.message.edit_text(
-            texts.AUTHOR_SENT.format(order_id=order.id, author=settings.author_name),
-            reply_markup=back_to_menu(),
+    tier = find_tier(settings, order.tier)
+    if tier is None:
+        sent = texts.AUTHOR_SENT_NO_TIER.format(
+            order_id=order.id, author=settings.author_name
         )
+    else:
+        sent = texts.AUTHOR_SENT.format(
+            order_id=order.id,
+            author=settings.author_name,
+            deadline=texts.genitive_hours(tier.hours),
+            work_hours=_work_hours_note(settings),
+        )
+
+    if isinstance(call.message, Message):
+        await call.message.edit_text(sent, reply_markup=back_to_menu())
     await call.answer()
 
 
@@ -352,3 +371,16 @@ async def on_followup(
     else:
         markup = back_to_menu()
     await message.answer(sent, reply_markup=markup)
+
+
+def _work_hours_note(settings: Settings) -> str:
+    """Рабочие часы, а в нерабочее время — ещё и когда начнётся отсчёт."""
+    note = texts.AUTHOR_WORK_HOURS.format(
+        hours=work_hours_label(settings), tz=settings.work_timezone_label
+    )
+    moment = now(settings)
+    if not is_working_time(settings, moment):
+        note += texts.AUTHOR_OFF_HOURS.format(
+            when=format_moment(settings, start_of_work(settings, moment), moment)
+        )
+    return note
