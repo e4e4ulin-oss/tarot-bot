@@ -37,8 +37,8 @@ REFERENCE = ROOT / "docs" / "design" / "reference"
 
 # Эталон на группу: по нему модель держит руку, по нему же считается приёмка
 REFERENCES = {
-    "fool": "justice-face.jpg",
-    "major1": "justice-face.jpg",
+    "fool": "magician-crimson.jpg",
+    "major1": "magician-crimson.jpg",
     "major2": "justice-indigo.jpg",
     "major3": "justice-indigo.jpg",
 }
