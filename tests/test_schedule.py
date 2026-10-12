@@ -65,10 +65,8 @@ def test_counting_starts_at_the_next_working_moment(moment, expected):
     [
         (msk(12, 10), 2, msk(12, 12)),  # обычный случай внутри дня
         (msk(12, 16), 2, msk(12, 18)),  # ровно до закрытия
-        (msk(12, 17, 50), 2, msk(13, 10, 50)),  # остаток часа переносится на утро
         (msk(12, 19, 30), 1, msk(13, 10)),  # заявка вечером
         (msk(13, 3), 3, msk(13, 12)),  # заявка ночью
-        (msk(16, 17, 30), 3, msk(19, 11, 30)),  # пятница вечером → понедельник
         (msk(17, 12), 1, msk(19, 10)),  # выходные целиком пропускаются
     ],
 )
@@ -76,18 +74,58 @@ def test_deadline_spends_only_working_hours(moment, hours, expected):
     assert deadline(settings(), moment, hours) == expected
 
 
-def test_deadline_never_lands_outside_working_hours():
-    for hour in range(0, 24):
-        for tier_hours in (1, 2, 3):
-            result = deadline(settings(), msk(12, hour), tier_hours)
-            assert is_working_time(settings(), result) or result.hour == 18
+@pytest.mark.parametrize(
+    ("moment", "hours", "expected"),
+    [
+        # Укладывается 75% и больше — доводим сегодня, выйдя за 18:00
+        (msk(12, 16, 30), 2, msk(12, 18, 30)),
+        (msk(12, 17, 15), 1, msk(12, 18, 15)),
+        (msk(12, 15, 45), 3, msk(12, 18, 45)),
+        # Меньше 75% — перенос на следующее утро, отсчёт с 9:00
+        (msk(12, 17), 2, msk(13, 11)),
+        (msk(12, 17, 30), 2, msk(13, 11)),
+        (msk(12, 17, 45), 1, msk(13, 10)),
+        (msk(16, 17, 30), 3, msk(19, 12)),  # пятница вечером → понедельник
+    ],
+)
+def test_small_overflow_is_finished_today_a_big_one_moves(moment, hours, expected):
+    assert deadline(settings(), moment, hours) == expected
+
+
+def test_threshold_is_configurable():
+    """При 100% за закрытие не выходим вовсе, при 50% — терпим больший хвост."""
+    strict = settings(WORK_OVERFLOW_SHARE=1.0)
+    loose = settings(WORK_OVERFLOW_SHARE=0.5)
+
+    assert deadline(strict, msk(12, 16, 30), 2) == msk(13, 11)
+    assert deadline(loose, msk(12, 17), 2) == msk(12, 19)
+
+
+def test_overflow_never_exceeds_the_allowed_share():
+    """Хвост за 18:00 ограничен: иначе «до 18:30» превратилось бы в «до ночи»."""
+    limit = settings().work_overflow_share
+    for hour in range(24):
+        for minute in (0, 15, 30, 45):
+            for tier_hours in (1, 2, 3):
+                result = deadline(settings(), msk(12, hour, minute), tier_hours)
+                if is_working_time(settings(), result):
+                    continue
+                closing = result.replace(hour=18, minute=0)
+                overflow = (result - closing).total_seconds() / 3600
+                assert 0 <= overflow <= tier_hours * (1 - limit) + 1e-9, (
+                    hour,
+                    minute,
+                    tier_hours,
+                    result,
+                )
 
 
 def test_working_hours_are_configurable():
     custom = settings(WORK_START_HOUR=10, WORK_END_HOUR=16)
 
     assert work_hours_label(custom) == "10:00–16:00"
-    assert deadline(custom, msk(12, 15), 2) == msk(13, 11)
+    # 15:00 + 2 ч: до закрытия в 16:00 укладывается половина — переносим на 10:00
+    assert deadline(custom, msk(12, 15), 2) == msk(13, 12)
 
 
 @pytest.mark.parametrize(

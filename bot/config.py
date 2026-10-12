@@ -58,6 +58,10 @@ class Settings(BaseSettings):
     work_timezone: str = Field(default="Europe/Moscow", alias="WORK_TIMEZONE")
     # Как часовой пояс называется в текстах для клиента
     work_timezone_label: str = Field(default="мск", alias="WORK_TIMEZONE_LABEL")
+    # Какая доля срока должна уместиться в рабочее время, чтобы доработать сегодня.
+    # 0.75: заявка в 16:30 со сроком 2 часа берётся в работу (до 18:30), а в 17:00 —
+    # уже переносится на следующее утро.
+    work_overflow_share: float = Field(default=0.75, alias="WORK_OVERFLOW_SHARE")
 
     # --- Управление службой из Telegram (/update, /restart, /logs) ---
     # Имя службы systemd и скрипт обновления; меняются, только если сервер

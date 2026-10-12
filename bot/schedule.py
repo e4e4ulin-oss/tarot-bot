@@ -60,22 +60,42 @@ def start_of_work(settings: Settings, moment: datetime) -> datetime:
     return opening
 
 
-def deadline(settings: Settings, moment: datetime, hours: int) -> datetime:
-    """Момент, к которому обещан ответ: часы тратятся только в рабочее время."""
-    current = start_of_work(settings, moment)
-    left = timedelta(hours=hours)
+def next_opening(settings: Settings, moment: datetime) -> datetime:
+    """Открытие следующего рабочего дня после дня, в котором находится moment."""
+    local = moment.astimezone(timezone(settings))
+    opening = local.replace(
+        hour=settings.work_start_hour, minute=0, second=0, microsecond=0
+    ) + timedelta(days=1)
+    while opening.weekday() not in WORKDAYS:
+        opening += timedelta(days=1)
+    return opening
 
-    while left > timedelta():
-        closing = current.replace(
+
+def deadline(settings: Settings, moment: datetime, hours: int) -> datetime:
+    """Момент, к которому обещан ответ.
+
+    Срок либо целиком укладывается в рабочий день, либо чуть-чуть выходит за него —
+    тогда работу доделывают сегодня, а не переносят ради остатка. Граница — доля
+    срока, попадающая в рабочие часы: не меньше work_overflow_share (по умолчанию
+    75%) — доделываем сегодня, меньше — начинаем со следующего рабочего утра.
+    """
+    start = start_of_work(settings, moment)
+
+    for _ in range(2):  # максимум один перенос: со следующего утра срок всегда влезает
+        finish = start + timedelta(hours=hours)
+        closing = start.replace(
             hour=settings.work_end_hour, minute=0, second=0, microsecond=0
         )
-        available = closing - current
-        if left <= available:
-            return current + left
-        left -= available
-        current = start_of_work(settings, closing)
+        if finish <= closing:
+            return finish
 
-    return current
+        inside = (closing - start) / (finish - start)
+        if inside >= settings.work_overflow_share:
+            return finish  # хвост небольшой — доводим сегодня
+
+        start = next_opening(settings, start)
+
+    return start + timedelta(hours=hours)
 
 
 def format_moment(settings: Settings, moment: datetime, reference: datetime | None = None) -> str:
