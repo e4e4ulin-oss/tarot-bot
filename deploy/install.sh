@@ -238,6 +238,24 @@ else
   $SUDO docker compose ps
 fi
 
+# --- Итоговая подсказка -------------------------------------------------------
+# Про /chatid имеет смысл говорить только тем, у кого заявкам ещё некуда идти:
+# иначе установщик советует настроить уже настроенное.
+if [ "$MODE" = "systemd" ]; then
+  RESTART_CMD="systemctl restart $SERVICE_NAME"
+else
+  RESTART_CMD="docker compose restart"
+fi
+
+if [ -n "$(get_env ADMIN_CHAT_ID)" ] && [ -n "$(get_env ADMIN_IDS)" ]; then
+  ADMIN_HINT="Заявки на авторский разбор уходят в чат $(get_env ADMIN_CHAT_ID) —
+     настраивать больше нечего. Сменить получателей: ADMIN_CHAT_ID и ADMIN_IDS
+     в $ENV_FILE, затем $RESTART_CMD"
+else
+  ADMIN_HINT="Отправьте боту /chatid — он пришлёт два числа. Впишите их в $ENV_FILE
+     (ADMIN_CHAT_ID и ADMIN_IDS) и выполните: $RESTART_CMD"
+fi
+
 if [ "$MODE" = "systemd" ]; then
 cat <<INFO
 
@@ -245,8 +263,7 @@ cat <<INFO
 
 Что дальше:
   1. Напишите боту /start в Telegram — проверьте, что отвечает.
-  2. Отправьте /chatid, впишите числа в $ENV_FILE
-     (ADMIN_CHAT_ID и ADMIN_IDS) и выполните: systemctl restart $SERVICE_NAME
+  2. $ADMIN_HINT
 
 Полезные команды:
   journalctl -u $SERVICE_NAME -f     логи бота
@@ -263,8 +280,7 @@ cat <<INFO
 
 Что дальше:
   1. Напишите боту /start в Telegram — проверьте, что отвечает.
-  2. Отправьте /chatid, впишите числа в $ENV_FILE
-     (ADMIN_CHAT_ID и ADMIN_IDS) и выполните: docker compose restart
+  2. $ADMIN_HINT
 
 Полезные команды (из каталога $PROJECT_DIR):
   docker compose logs -f       логи бота
