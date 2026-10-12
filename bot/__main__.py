@@ -16,7 +16,7 @@ from .config import Settings, describe_missing_settings, get_settings
 from .db import create_engine, create_session_factory, init_models
 from .handlers import build_router
 from .middlewares import DbSessionMiddleware, ThrottlingMiddleware, UserMiddleware
-from .services import GrokClient, Interpreter
+from .services import GrokClient, Interpreter, ServerOps
 
 logger = logging.getLogger(__name__)
 
@@ -33,10 +33,12 @@ def build_dispatcher(
     session_factory,
     *,
     throttle_rate: float = 0.7,
+    server: ServerOps | None = None,
 ) -> Dispatcher:
     dp = Dispatcher(storage=MemoryStorage())
     dp["settings"] = settings
     dp["interpreter"] = interpreter
+    dp["server"] = server or ServerOps(settings.service_name, settings.update_script)
 
     dp.update.middleware(DbSessionMiddleware(session_factory))
     dp.update.middleware(UserMiddleware())

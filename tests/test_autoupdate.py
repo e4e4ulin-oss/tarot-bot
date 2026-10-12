@@ -78,7 +78,7 @@ def server(tmp_path: Path) -> dict:
     return {"author": author, "deployed": deployed, "bin": stub_bin, "calls": calls, "home": home}
 
 
-def run_update(server: dict) -> subprocess.CompletedProcess:
+def run_update(server: dict, *flags: str) -> subprocess.CompletedProcess:
     env = {
         **os.environ,
         "PATH": f"{server['bin']}:{os.environ['PATH']}",
@@ -86,7 +86,7 @@ def run_update(server: dict) -> subprocess.CompletedProcess:
         "TAROT_SERVICE": "test-bot",
     }
     return subprocess.run(
-        ["bash", str(SCRIPT), str(server["deployed"])],
+        ["bash", str(SCRIPT), str(server["deployed"]), *flags],
         env=env,
         capture_output=True,
         text=True,
@@ -163,3 +163,30 @@ def test_broken_code_is_rolled_back_without_restarting(server: dict) -> None:
     assert git("rev-parse", "HEAD", cwd=server["deployed"]) == before
     assert not (server["deployed"] / "bot" / "broken.py").exists()
     assert "systemctl" not in calls(server)
+
+
+def test_no_restart_leaves_the_service_alone(server: dict) -> None:
+    """Так обновление вызывает сам бот: он должен успеть ответить в Telegram."""
+    commit(server["author"], "feature.py", "правка из чата\n")
+
+    done = run_update(server, "--no-restart")
+
+    assert done.returncode == 10, done.stderr  # UPDATE_APPLIED
+    assert (server["deployed"] / "feature.py").exists()
+    assert "systemctl" not in calls(server)
+    assert "перезапуск за вызывающим" in done.stdout
+
+
+def test_no_restart_on_fresh_code_reports_nothing_to_do(server: dict) -> None:
+    done = run_update(server, "--no-restart")
+
+    assert done.returncode == 0, done.stderr
+    assert "уже свежая версия" in done.stdout
+    assert "systemctl" not in calls(server)
+
+
+def test_unknown_flag_is_refused(server: dict) -> None:
+    done = run_update(server, "--surprise")
+
+    assert done.returncode == 2
+    assert "неизвестный параметр" in done.stderr

@@ -21,7 +21,7 @@ from aiogram.types import Message as TgMessage
 from bot.__main__ import build_dispatcher
 from bot.config import Settings
 from bot.db import OrderStatus, Repo, create_engine, create_session_factory, init_models
-from bot.services import GrokClient, Interpreter
+from bot.services import UPDATE_APPLIED, CommandResult, GrokClient, Interpreter
 
 ADMIN_CHAT_ID = -100999
 ADMIN_ID = 777
@@ -395,3 +395,131 @@ async def test_order_reaches_every_admin(env):
         call.chat_id for call in session.methods("SendMessage") if "Заявка" in (call.text or "")
     ]
     assert recipients == [ADMIN_CHAT_ID, ADMIN_ID], recipients
+
+
+class StubServer:
+    """Служба бота без службы: команды только записываются."""
+
+    def __init__(self) -> None:
+        self.logs_result = CommandResult(0, "строка журнала")
+        self.update_result = CommandResult(0, "уже свежая версия (abc1234)")
+        self.asked_lines: list[int] = []
+        self.restarts = 0
+
+    async def logs(self, lines: int) -> CommandResult:
+        self.asked_lines.append(lines)
+        return self.logs_result
+
+    async def update(self) -> CommandResult:
+        return self.update_result
+
+    async def restart(self) -> CommandResult:
+        self.restarts += 1
+        return CommandResult(0, "")
+
+
+@pytest.fixture
+def server(env):
+    dp, *_ = env
+    original = dp["server"]
+    stub = StubServer()
+    dp["server"] = stub
+    yield stub
+    dp["server"] = original
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_logs_returns_the_journal_tail(env, server):
+    dp, bot, session, _ = env
+
+    await feed(dp, bot, make_message("/logs", chat_id=ADMIN_CHAT_ID, user_id=ADMIN_ID), 1)
+
+    assert server.asked_lines == [40]
+    assert any("Журнал бота" in text and "строка журнала" in text for text in session.texts())
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_logs_accepts_a_line_count(env, server):
+    dp, bot, session, _ = env
+
+    await feed(dp, bot, make_message("/logs 120", chat_id=ADMIN_CHAT_ID, user_id=ADMIN_ID), 1)
+
+    assert server.asked_lines == [120]
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_logs_explains_itself_instead_of_guessing(env, server):
+    dp, bot, session, _ = env
+
+    await feed(dp, bot, make_message("/logs вчера", chat_id=ADMIN_CHAT_ID, user_id=ADMIN_ID), 1)
+
+    assert server.asked_lines == []
+    assert any("Сколько последних строк" in text for text in session.texts())
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_update_on_fresh_code_restarts_nothing(env, server):
+    dp, bot, session, _ = env
+
+    await feed(dp, bot, make_message("/update", chat_id=ADMIN_CHAT_ID, user_id=ADMIN_ID), 1)
+
+    assert server.restarts == 0
+    assert any("уже свежий" in text for text in session.texts("EditMessageText"))
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_update_applies_changes_then_restarts(env, server):
+    dp, bot, session, _ = env
+    server.update_result = CommandResult(UPDATE_APPLIED, "обновление abc1234 → def5678")
+
+    await feed(dp, bot, make_message("/update", chat_id=ADMIN_CHAT_ID, user_id=ADMIN_ID), 1)
+
+    # Сначала ответ, потом перезапуск: иначе бота остановят до отправки сообщения.
+    texts_sent = session.texts("EditMessageText")
+    assert any("Правки загружены" in text for text in texts_sent)
+    assert server.restarts == 1
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_update_keeps_the_bot_running_when_it_fails(env, server):
+    dp, bot, session, _ = env
+    server.update_result = CommandResult(1, "код не компилируется — откатываюсь")
+
+    await feed(dp, bot, make_message("/update", chat_id=ADMIN_CHAT_ID, user_id=ADMIN_ID), 1)
+
+    assert server.restarts == 0
+    assert any("прежней версии" in text for text in session.texts("EditMessageText"))
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_unavailable_command_says_what_to_fix(env, server):
+    dp, bot, session, _ = env
+    server.update_result = CommandResult(127, "sudo: command not found")
+
+    await feed(dp, bot, make_message("/update", chat_id=ADMIN_CHAT_ID, user_id=ADMIN_ID), 1)
+
+    assert server.restarts == 0
+    assert any("установщика" in text for text in session.texts("EditMessageText"))
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_restart_warns_before_going_down(env, server):
+    dp, bot, session, _ = env
+
+    await feed(dp, bot, make_message("/restart", chat_id=ADMIN_CHAT_ID, user_id=ADMIN_ID), 1)
+
+    assert server.restarts == 1
+    assert any("Перезапускаю" in text for text in session.texts())
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_service_commands_are_closed_to_everyone_else(env, server):
+    dp, bot, session, _ = env
+
+    await feed(dp, bot, make_message("/update", chat_id=4242), 1)
+    await feed(dp, bot, make_message("/restart", chat_id=4242), 2)
+    await feed(dp, bot, make_message("/logs", chat_id=4242), 3)
+
+    assert server.restarts == 0
+    assert server.asked_lines == []
+    assert all("только автору" in text for text in session.texts())

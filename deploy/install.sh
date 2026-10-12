@@ -207,6 +207,35 @@ if [ "$MODE" = "systemd" ]; then
   # tarot: — основная группа пользователя, как бы она ни называлась в этой системе
   $SUDO chown -R tarot: "$PROJECT_DIR"
 
+  # Копия вне репозитория: обновление кода не должно перезаписывать скрипт,
+  # пока тот работает. Заодно получается короткая команда tarot-update.
+  $SUDO install -m 755 "$PROJECT_DIR/deploy/autoupdate.sh" /usr/local/bin/tarot-update
+
+  # Права ровно на две команды — чтобы /update и /restart работали из Telegram.
+  # Аргументы перечислены целиком: sudoers разрешает только дословное совпадение,
+  # поэтому ничего другого этими правами сделать нельзя.
+  sudoers_tmp="$(mktemp)"
+  cat > "$sudoers_tmp" <<RULES
+# Создано установщиком таро-бота.
+tarot ALL=(root) NOPASSWD: /usr/local/bin/tarot-update --no-restart
+tarot ALL=(root) NOPASSWD: /usr/bin/systemctl --no-block restart $SERVICE_NAME
+tarot ALL=(root) NOPASSWD: /bin/systemctl --no-block restart $SERVICE_NAME
+RULES
+  # Битый файл в sudoers.d ломает sudo целиком, поэтому сначала проверка.
+  if $SUDO visudo -cqf "$sudoers_tmp" >/dev/null 2>&1; then
+    $SUDO install -m 440 "$sudoers_tmp" "/etc/sudoers.d/$SERVICE_NAME"
+  else
+    log "sudo не принял правила — команды /update и /restart из Telegram работать не будут"
+  fi
+  rm -f "$sudoers_tmp"
+
+  # Чтение журнала службы: без этой группы /logs вернёт пустоту.
+  if getent group systemd-journal >/dev/null 2>&1; then
+    JOURNAL_LINE="SupplementaryGroups=systemd-journal"
+  else
+    JOURNAL_LINE=""
+  fi
+
   log "Создаю службу $SERVICE_NAME…"
   $SUDO tee "/etc/systemd/system/$SERVICE_NAME.service" >/dev/null <<UNIT
 [Unit]
@@ -217,6 +246,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=tarot
+$JOURNAL_LINE
 WorkingDirectory=$PROJECT_DIR
 EnvironmentFile=$ENV_FILE
 ExecStart=$PROJECT_DIR/.venv/bin/python -m bot
@@ -233,10 +263,6 @@ UNIT
 
   if [ "$AUTOUPDATE" = "yes" ]; then
     log "Включаю автообновление из GitHub…"
-    # Копия вне репозитория: обновление кода не должно перезаписывать скрипт,
-    # пока тот работает. Заодно получается короткая команда tarot-update.
-    $SUDO install -m 755 "$PROJECT_DIR/deploy/autoupdate.sh" /usr/local/bin/tarot-update
-
     $SUDO tee "/etc/systemd/system/$SERVICE_NAME-update.service" >/dev/null <<UNIT
 [Unit]
 Description=Tarot bot: подтянуть свежий код из GitHub

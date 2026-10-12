@@ -6,7 +6,7 @@ import logging
 
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
@@ -15,7 +15,8 @@ from ..config import Settings
 from ..db import Order, OrderStatus, Repo
 from ..filters import IsAdmin
 from ..keyboards import admin_order_menu, followup_menu
-from ..services import GrokError, Interpreter
+from ..services import UPDATE_APPLIED, GrokError, Interpreter, ServerOps
+from ..services.server import LOGS_DEFAULT, LOGS_MAX, LOGS_MIN
 from ..states import AdminFlow
 from ..utils import fmt_date
 
@@ -221,3 +222,71 @@ async def cmd_diag(message: Message, settings: Settings, interpreter: Interprete
         )
 
     await status.edit_text("\n".join(lines))
+
+
+# Telegram не принимает сообщения длиннее 4096 символов, а в журнале интересен
+# хвост — обрезаем начало.
+_OUTPUT_LIMIT = 3400
+
+
+def _tail(output: str) -> str:
+    clipped = output[-_OUTPUT_LIMIT:]
+    if len(output) > _OUTPUT_LIMIT:
+        clipped = "…\n" + clipped.split("\n", 1)[-1]
+    return texts.esc(clipped or "—")
+
+
+@router.message(Command("logs"))
+async def cmd_logs(message: Message, command: CommandObject, server: ServerOps) -> None:
+    """Последние строки журнала службы — чтобы смотреть логи с телефона."""
+    lines = LOGS_DEFAULT
+    if command.args:
+        asked = command.args.strip()
+        if not asked.isdigit():
+            await message.answer(
+                texts.SERVER_LOGS_USAGE.format(low=LOGS_MIN, high=LOGS_MAX, default=LOGS_DEFAULT)
+            )
+            return
+        lines = int(asked)
+
+    result = await server.logs(lines)
+    if result.unavailable or not result.ok:
+        await message.answer(texts.SERVER_UNAVAILABLE.format(output=_tail(result.output)))
+        return
+    if not result.output:
+        await message.answer(texts.SERVER_LOGS_EMPTY)
+        return
+
+    shown = min(max(lines, LOGS_MIN), LOGS_MAX)
+    await message.answer(texts.SERVER_LOGS_HEADER.format(lines=shown, output=_tail(result.output)))
+
+
+@router.message(Command("update"))
+async def cmd_update(message: Message, server: ServerOps) -> None:
+    """Подтянуть правки из GitHub не дожидаясь таймера."""
+    status = await message.answer(texts.SERVER_UPDATE_CHECKING)
+    result = await server.update()
+    output = _tail(result.output)
+
+    if result.unavailable:
+        await status.edit_text(texts.SERVER_UNAVAILABLE.format(output=output))
+        return
+    if result.code == UPDATE_APPLIED:
+        await status.edit_text(texts.SERVER_UPDATE_APPLIED.format(output=output))
+        # Ответ уже отправлен, так что переживать за прерванный перезапуск нечего.
+        await server.restart()
+        return
+    if result.ok:
+        await status.edit_text(texts.SERVER_UPDATE_FRESH.format(output=output))
+        return
+
+    await status.edit_text(texts.SERVER_UPDATE_FAILED.format(output=output))
+
+
+@router.message(Command("restart"))
+async def cmd_restart(message: Message, server: ServerOps) -> None:
+    """Перезапуск службы: например, после правки .env на сервере."""
+    await message.answer(texts.SERVER_RESTARTING)
+    result = await server.restart()
+    if not result.ok:
+        await message.answer(texts.SERVER_UNAVAILABLE.format(output=_tail(result.output)))

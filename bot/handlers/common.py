@@ -103,7 +103,7 @@ async def cmd_chatid(message: Message) -> None:
     )
 
 
-@fallback_router.message(Command("diag", "orders", "order", "stats"))
+@fallback_router.message(Command("diag", "orders", "order", "stats", "logs", "update", "restart"))
 async def admin_only_command(message: Message) -> None:
     """Команда автора, до которой добрался не автор: молчание тут только путает."""
     await message.answer(texts.ADMIN_ONLY)

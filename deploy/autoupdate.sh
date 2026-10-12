@@ -15,9 +15,23 @@
 # Переменные окружения: TAROT_DIR, TAROT_SERVICE, TAROT_BRANCH.
 set -euo pipefail
 
-DIR="${1:-${TAROT_DIR:-/opt/tarot-bot}}"
+DIR="${TAROT_DIR:-/opt/tarot-bot}"
 SERVICE="${TAROT_SERVICE:-tarot-bot}"
 BRANCH="${TAROT_BRANCH:-main}"
+RESTART="yes"
+
+# --no-restart нужен боту: он сам вызывает обновление и хочет успеть ответить в
+# Telegram до того, как служба остановится. Код возврата 10 означает «правки
+# применены, перезапуск за вами».
+UPDATE_APPLIED=10
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --no-restart) RESTART="no"; shift ;;
+    -*) printf 'неизвестный параметр: %s\n' "$1" >&2; exit 2 ;;
+    *) DIR="$1"; shift ;;
+  esac
+done
 
 log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1"; }
 
@@ -65,6 +79,11 @@ fi
 # Файлы после reset принадлежат root — возвращаем службе её каталог.
 if id -u tarot >/dev/null 2>&1; then
   chown -R tarot: "$DIR"
+fi
+
+if [ "$RESTART" = "no" ]; then
+  log "код обновлён до ${fresh:0:7}, перезапуск за вызывающим"
+  exit "$UPDATE_APPLIED"
 fi
 
 systemctl restart "$SERVICE"

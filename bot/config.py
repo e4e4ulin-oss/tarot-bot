@@ -46,6 +46,12 @@ class Settings(BaseSettings):
     grok_max_tokens: int = Field(default=3000, alias="GROK_MAX_TOKENS")
     grok_temperature: float = Field(default=0.8, alias="GROK_TEMPERATURE")
 
+    # --- Управление службой из Telegram (/update, /restart, /logs) ---
+    # Имя службы systemd и скрипт обновления; меняются, только если сервер
+    # настроен нестандартно. Права на эти команды выдаёт установщик.
+    service_name: str = Field(default="tarot-bot", alias="SERVICE_NAME")
+    update_script: str = Field(default="/usr/local/bin/tarot-update", alias="UPDATE_SCRIPT")
+
     # --- Хранилище ---
     database_url: str = Field(default="sqlite+aiosqlite:///data/tarot.db", alias="DATABASE_URL")
 
