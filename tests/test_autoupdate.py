@@ -190,3 +190,23 @@ def test_unknown_flag_is_refused(server: dict) -> None:
 
     assert done.returncode == 2
     assert "неизвестный параметр" in done.stderr
+
+
+def test_failed_dependency_install_rolls_back(server: dict) -> None:
+    """Код без своих зависимостей не запустится — такой ревизии на сервере делать нечего."""
+    pip = server["deployed"] / ".venv" / "bin" / "pip"
+    pip.write_text('#!/bin/sh\necho "pip упал" >&2\nexit 1\n', encoding="utf-8")
+    pip.chmod(0o755)
+
+    before = git("rev-parse", "HEAD", cwd=server["deployed"])
+    (server["author"] / "requirements.txt").write_text("aiogram\npillow\n", encoding="utf-8")
+    git("add", "requirements.txt", cwd=server["author"])
+    git("commit", "-qm", "new dep", cwd=server["author"])
+    git("push", "-q", "origin", "HEAD:main", cwd=server["author"])
+
+    done = run_update(server)
+
+    assert done.returncode == 1
+    assert "откатываюсь" in done.stdout
+    assert git("rev-parse", "HEAD", cwd=server["deployed"]) == before
+    assert "systemctl" not in calls(server)

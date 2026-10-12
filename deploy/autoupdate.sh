@@ -62,7 +62,13 @@ deps_after="$(git -C "$DIR" rev-parse 'HEAD:requirements.txt' 2>/dev/null || tru
 
 if [ "$deps_before" != "$deps_after" ] && [ -x "$DIR/.venv/bin/pip" ]; then
   log "список зависимостей изменился — доустанавливаю"
-  "$DIR/.venv/bin/pip" install -q -r "$DIR/requirements.txt"
+  # Без новых зависимостей свежий код не запустится, поэтому неудача здесь —
+  # повод вернуться на прежнюю ревизию, а не оставлять бота в разобранном виде.
+  if ! "$DIR/.venv/bin/pip" install -q -r "$DIR/requirements.txt"; then
+    log "зависимости не встали — откатываюсь на ${current:0:7}, бот продолжает работать"
+    git -C "$DIR" reset --quiet --hard "$current"
+    exit 1
+  fi
 fi
 
 # Правка могла прийти с телефона и не проверяться локально. Синтаксис — самое
