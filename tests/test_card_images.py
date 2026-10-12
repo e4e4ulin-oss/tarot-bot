@@ -8,9 +8,19 @@ import pytest
 from PIL import Image
 
 from bot.tarot import get_card
+from bot.tarot import images as images_module
 from bot.tarot.images import REVERSED_SUFFIX, cache_key, reversed_image_bytes, rotate_180
 
 CARD = get_card("major_18")
+
+# Общая заглушка из conftest подменяет загрузку картинок, а здесь проверяется
+# именно она — забираем настоящую функцию до подмены и возвращаем на место.
+REAL_CARD_IMAGE_BYTES = images_module.card_image_bytes
+
+
+@pytest.fixture(autouse=True)
+def _restore_real_loader(monkeypatch):
+    monkeypatch.setattr(images_module, "card_image_bytes", REAL_CARD_IMAGE_BYTES)
 
 
 def sample_image(width: int = 64, height: int = 32) -> bytes:

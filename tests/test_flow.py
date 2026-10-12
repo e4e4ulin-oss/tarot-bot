@@ -22,6 +22,8 @@ from bot.__main__ import build_dispatcher
 from bot.config import Settings
 from bot.db import OrderStatus, Repo, create_engine, create_session_factory, init_models
 from bot.services import UPDATE_APPLIED, CommandResult, GrokClient, Interpreter
+from bot.tarot import get_card
+from bot.tarot.images import cache_key
 
 ADMIN_CHAT_ID = -100999
 ADMIN_ID = 777
@@ -147,6 +149,16 @@ def env(app):
     dp, bot, session, factory = app
     session.clear()
     return dp, bot, session, factory
+
+
+async def forget_cached_image(db, key: str) -> None:
+    """Убирает запись кэша: база общая на модуль, и соседний тест мог её создать."""
+    from sqlalchemy import delete
+
+    from bot.db import CardImage
+
+    await db.execute(delete(CardImage).where(CardImage.card_id == key))
+    await db.commit()
 
 
 async def feed(dp, bot, event, update_id: int = 1) -> None:
@@ -355,9 +367,11 @@ async def test_reading_sends_card_images_and_caches_file_ids(env):
 
     async with factory() as db:
         readings = await Repo(db).last_readings(chat)
-        card_id = readings[0].cards[0]["card"]
-        cached = await Repo(db).card_file_ids([card_id])
-    assert cached.get(card_id), "file_id карты не сохранился"
+        drawn_card = readings[0].cards[0]
+        # У перевёрнутой карты своя, повёрнутая картинка — значит и свой ключ кэша
+        key = cache_key(get_card(drawn_card["card"]), drawn_card["reversed"])
+        cached = await Repo(db).card_file_ids([key])
+    assert cached.get(key), "file_id карты не сохранился"
 
     # та же карта во второй раз уходит уже по file_id, без обращения к Викискладу
     from bot.handlers.auto import send_card_images
@@ -375,7 +389,7 @@ async def test_reading_sends_card_images_and_caches_file_ids(env):
         await send_card_images(bot, anchor.chat.id, drawn, Repo(db), dp["settings"])
 
     sources = [item.media for item in session.methods("SendMediaGroup")[0].media]
-    assert sources == [cached[card_id]], sources
+    assert sources == [cached[key]], sources
 
 
 @pytest.mark.asyncio(loop_scope="module")
@@ -875,6 +889,7 @@ async def test_reversed_card_is_sent_upside_down_and_cached_apart(env, monkeypat
 
     session.clear()
     async with factory() as db:
+        await forget_cached_image(db, cache_key(card, True))
         await send_card_images(bot, 1601, drawn, Repo(db), dp["settings"])
 
     media = session.methods("SendMediaGroup")[0].media
@@ -905,6 +920,7 @@ async def test_unrotatable_card_falls_back_without_poisoning_the_cache(env, monk
 
     session.clear()
     async with factory() as db:
+        await forget_cached_image(db, cache_key(card, True))
         await send_card_images(bot, 1602, drawn, Repo(db), dp["settings"])
 
     assert len(session.methods("SendMediaGroup")) == 1  # картинка всё же ушла
