@@ -104,6 +104,8 @@ class Order(Base):
     )
     admin_id: Mapped[int | None] = mapped_column(BigInteger)
     admin_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    # Сколько уточняющих вопросов человек уже задал по этой заявке
+    followups_used: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, index=True
     )

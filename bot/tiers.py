@@ -10,12 +10,17 @@ from dataclasses import dataclass
 
 from .config import Settings
 
+# Сколько уточнений даём заявке, оформленной до появления уровней.
+DEFAULT_FOLLOWUPS = 1
+
 
 @dataclass(frozen=True)
 class Tier:
     key: str
     title: str
     price: int
+    # Сколько уточняющих вопросов входит в уровень
+    followups: int
     # Одной строкой — для кнопки и сводки заявки
     summary: str
     # Построчно — для списка уровней перед выбором
@@ -29,20 +34,24 @@ class Tier:
 
 
 # Тексты описывают объём работы, а не сроки: обещать срок бот не вправе.
-_TIERS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
+# Число уточнений здесь — то же, которое потом проверяется в коде.
+_TIERS: tuple[tuple[str, str, int, str, tuple[str, ...]], ...] = (
     (
         "short",
         "Лаконичный",
+        0,
         "три карты, короткий ответ по сути",
         (
             "расклад из трёх карт на ваш вопрос",
             "короткий ответ: что происходит и что с этим делать",
             "без разбора каждой карты по отдельности",
+            "без уточняющих вопросов после ответа",
         ),
     ),
     (
         "base",
         "Базовый",
+        1,
         "расклад под вопрос и развёрнутый разбор",
         (
             "расклад подбирается под вашу ситуацию",
@@ -53,12 +62,13 @@ _TIERS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     (
         "full",
         "Полный",
+        3,
         "большой расклад, разбор по блокам, рекомендации",
         (
             "развёрнутый расклад с несколькими позициями",
             "разбор по блокам: ситуация, что скрыто, препятствия, совет, к чему идёт",
             "практические рекомендации",
-            "уточняющие вопросы после ответа",
+            "до трёх уточняющих вопросов после ответа",
         ),
     ),
 )
@@ -75,10 +85,23 @@ def _price(settings: Settings, key: str) -> int:
 def tiers(settings: Settings) -> tuple[Tier, ...]:
     """Уровни, доступные клиенту: нулевая цена означает «не предлагаем»."""
     return tuple(
-        Tier(key=key, title=title, price=_price(settings, key), summary=summary, includes=includes)
-        for key, title, summary, includes in _TIERS
+        Tier(
+            key=key,
+            title=title,
+            price=_price(settings, key),
+            followups=followups,
+            summary=summary,
+            includes=includes,
+        )
+        for key, title, followups, summary, includes in _TIERS
         if _price(settings, key) > 0
     )
+
+
+def followups_allowed(settings: Settings, key: str | None) -> int:
+    """Сколько уточнений входит в уровень заявки."""
+    tier = find_tier(settings, key)
+    return DEFAULT_FOLLOWUPS if tier is None else tier.followups
 
 
 def find_tier(settings: Settings, key: str | None) -> Tier | None:

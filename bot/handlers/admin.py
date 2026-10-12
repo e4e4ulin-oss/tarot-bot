@@ -14,11 +14,11 @@ from .. import texts
 from ..config import Settings
 from ..db import Order, OrderStatus, Repo
 from ..filters import IsAdmin
-from ..keyboards import admin_order_menu, followup_menu
+from ..keyboards import admin_order_menu, back_to_menu, followup_menu
 from ..services import UPDATE_APPLIED, GrokError, Interpreter, ServerOps
 from ..services.server import LOGS_DEFAULT, LOGS_MAX, LOGS_MIN
 from ..states import AdminFlow
-from ..tiers import tier_label
+from ..tiers import followups_allowed, tier_label
 from ..utils import fmt_date
 
 logger = logging.getLogger(__name__)
@@ -104,11 +104,17 @@ async def deliver_answer(
             from_chat_id=message.chat.id,
             message_id=message.message_id,
         )
-        await bot.send_message(
-            order.user_id,
-            "Если что-то осталось непонятным — можно задать уточняющий вопрос.",
-            reply_markup=followup_menu(order.id),
-        )
+        left = followups_allowed(settings, order.tier) - (order.followups_used or 0)
+        if left > 0:
+            await bot.send_message(
+                order.user_id,
+                texts.AUTHOR_FOLLOWUP_LEFT.format(left=texts.plural_followups(left)),
+                reply_markup=followup_menu(order.id),
+            )
+        else:
+            await bot.send_message(
+                order.user_id, texts.AUTHOR_FOLLOWUP_NONE, reply_markup=back_to_menu()
+            )
     except TelegramAPIError as exc:
         logger.warning("Доставка ответа по заявке №%s не удалась: %s", order.id, exc)
         await message.answer(

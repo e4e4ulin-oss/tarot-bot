@@ -149,6 +149,11 @@ class Repo:
         await self.session.commit()
         return order
 
+    async def count_followup(self, order: Order) -> Order:
+        order.followups_used = (order.followups_used or 0) + 1
+        await self.session.commit()
+        return order
+
     async def set_admin_message(self, order: Order, message_id: int) -> Order:
         order.admin_message_id = message_id
         await self.session.commit()

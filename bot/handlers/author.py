@@ -18,12 +18,13 @@ from ..keyboards import (
     cancel_order_menu,
     confirm_order_menu,
     contact_menu,
+    followup_menu,
     main_menu,
     tiers_menu,
     topics_menu,
 )
 from ..states import AuthorFlow
-from ..tiers import Tier, find_tier, tier_label, tiers
+from ..tiers import Tier, find_tier, followups_allowed, tier_label, tiers
 from ..utils import fmt_date
 
 logger = logging.getLogger(__name__)
@@ -273,13 +274,44 @@ async def cb_cancel_order(call: CallbackQuery, repo: Repo, settings: Settings, b
 
 
 @router.callback_query(F.data.startswith("order:followup:"))
-async def cb_followup(call: CallbackQuery, state: FSMContext, settings: Settings) -> None:
-    order_id = int(call.data.rsplit(":", 1)[1])
+async def cb_followup(
+    call: CallbackQuery, state: FSMContext, settings: Settings, repo: Repo
+) -> None:
+    order = await repo.get_order(int(call.data.rsplit(":", 1)[1]))
+    if order is None or order.user_id != call.from_user.id:
+        await call.answer(texts.ERROR, show_alert=True)
+        return
+
+    # Кнопка живёт в старом сообщении и доступна повторно, поэтому лимит
+    # проверяется здесь, а не только при её показе.
+    if _followups_left(settings, order) <= 0:
+        await _say_no_followups_left(call.message, settings, order)
+        await call.answer()
+        return
+
     await state.set_state(AuthorFlow.waiting_followup)
-    await state.update_data(order_id=order_id)
+    await state.update_data(order_id=order.id)
     if isinstance(call.message, Message):
         await call.message.answer(texts.AUTHOR_FOLLOWUP_ASK.format(author=settings.author_name))
     await call.answer()
+
+
+def _followups_left(settings: Settings, order: Order) -> int:
+    return followups_allowed(settings, order.tier) - (order.followups_used or 0)
+
+
+async def _say_no_followups_left(message: object, settings: Settings, order: Order) -> None:
+    if not isinstance(message, Message):
+        return
+    allowed = followups_allowed(settings, order.tier)
+    tier = find_tier(settings, order.tier)
+    await message.answer(
+        texts.AUTHOR_FOLLOWUP_SPENT.format(
+            tier=texts.esc(tier.title if tier else "—"),
+            allowed=texts.plural_followups(allowed),
+        ),
+        reply_markup=back_to_menu(),
+    )
 
 
 @router.message(AuthorFlow.waiting_followup, F.text)
@@ -294,6 +326,10 @@ async def on_followup(
         await message.answer(texts.ERROR)
         return
 
+    if _followups_left(settings, order) <= 0:
+        await _say_no_followups_left(message, settings, order)
+        return
+
     user_line = texts.esc(message.from_user.full_name)
     if message.from_user.username:
         user_line += f" (@{texts.esc(message.from_user.username)})"
@@ -306,7 +342,13 @@ async def on_followup(
         reply_markup=admin_order_menu(order.id, taken=True),
     )
 
-    await message.answer(
-        texts.AUTHOR_FOLLOWUP_SENT.format(author=settings.author_name),
-        reply_markup=back_to_menu(),
-    )
+    await repo.count_followup(order)
+
+    left = _followups_left(settings, order)
+    sent = texts.AUTHOR_FOLLOWUP_SENT.format(author=settings.author_name)
+    if left > 0:
+        sent += "\n\n" + texts.AUTHOR_FOLLOWUP_LEFT.format(left=texts.plural_followups(left))
+        markup = followup_menu(order.id)
+    else:
+        markup = back_to_menu()
+    await message.answer(sent, reply_markup=markup)

@@ -19,7 +19,10 @@ logger = logging.getLogger(__name__)
 
 # Колонки, добавленные к уже существующим таблицам. create_all() обходит таблицу,
 # если она есть, поэтому у работающего бота новые поля надо дописывать самим.
-ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (("orders", "tier", "VARCHAR(16)"),)
+ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("orders", "tier", "VARCHAR(16)"),
+    ("orders", "followups_used", "INTEGER DEFAULT 0 NOT NULL"),
+)
 
 
 def _ensure_sqlite_dir(url: str) -> None:

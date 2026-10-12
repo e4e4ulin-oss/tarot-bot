@@ -83,7 +83,8 @@ AUTHOR_TIER_BLOCK = "<b>{title} · {price}</b>\n{includes}"
 
 AUTHOR_TIER_CHOSEN = (
     "<b>{title} · {price}</b>\n{includes}\n\n"
-    "Оплата — после того, как разбор будет готов и вы его получите.\n\n"
+    "Оплата — до начала работы: когда заявку возьмут, вам напишут, как оплатить. "
+    "Разбор готовится после оплаты.\n\n"
 )
 
 AUTHOR_ASK_TOPIC = "Выберите тему разбора:"
@@ -120,6 +121,17 @@ AUTHOR_ANSWER_HEADER = "✍️ <b>Авторский разбор</b>\nОтве�
 AUTHOR_FOLLOWUP_ASK = "Напишите уточняющий вопрос одним сообщением — {author} его увидит."
 
 AUTHOR_FOLLOWUP_SENT = "Отправлено. {author} увидит ваш вопрос."
+
+AUTHOR_FOLLOWUP_LEFT = "Можно задать уточняющий вопрос — осталось {left}."
+
+AUTHOR_FOLLOWUP_NONE = (
+    "Если что-то осталось непонятным — оформите новую заявку, и разберём подробнее."
+)
+
+AUTHOR_FOLLOWUP_SPENT = (
+    "Уточнения по этой заявке закончились: в уровень «{tier}» входит {allowed}. "
+    "Можно оформить новую заявку."
+)
 
 AUTHOR_DECLINED = (
     "К сожалению, {author} не сможет взять заявку №{order_id} в работу.\n"
@@ -239,6 +251,20 @@ def topic_label(key: str | None) -> str:
     if not key:
         return "не указана"
     return TOPICS.get(key, key)
+
+
+def plural_followups(count: int) -> str:
+    """«1 вопрос», «2 вопроса», «5 вопросов» — иначе фраза читается как машинная."""
+    tail = count % 100
+    if 11 <= tail <= 14:
+        word = "вопросов"
+    elif count % 10 == 1:
+        word = "вопрос"
+    elif count % 10 in (2, 3, 4):
+        word = "вопроса"
+    else:
+        word = "вопросов"
+    return f"{count} {word}"
 
 
 def short(text: str, limit: int = 120) -> str:

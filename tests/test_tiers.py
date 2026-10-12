@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from bot.config import Settings
-from bot.tiers import find_tier, tier_label, tiers
+from bot.tiers import find_tier, followups_allowed, tier_label, tiers
 
 
 def settings(**overrides) -> Settings:
@@ -53,3 +53,30 @@ def test_label_carries_the_price(key, expected):
 
 def test_currency_is_configurable():
     assert tier_label(settings(AUTHOR_CURRENCY="RUB"), "base") == "Базовый · 700 RUB"
+
+
+def test_each_level_promises_its_own_number_of_followups():
+    assert [(tier.key, tier.followups) for tier in tiers(settings())] == [
+        ("short", 0),
+        ("base", 1),
+        ("full", 3),
+    ]
+
+
+@pytest.mark.parametrize(("key", "expected"), [("short", 0), ("base", 1), ("full", 3)])
+def test_allowance_matches_the_level(key, expected):
+    assert followups_allowed(settings(), key) == expected
+
+
+def test_orders_placed_before_levels_existed_keep_one_followup():
+    """Старым заявкам уточнения обещали без числа — отнимать их задним числом нечестно."""
+    assert followups_allowed(settings(), None) == 1
+
+
+def test_promise_text_matches_the_enforced_number():
+    """Текст и лимит расходиться не должны: это и был исходный дефект."""
+    by_key = {tier.key: tier for tier in tiers(settings())}
+
+    assert "без уточняющих вопросов" in " ".join(by_key["short"].includes)
+    assert "один уточняющий вопрос" in " ".join(by_key["base"].includes)
+    assert "до трёх уточняющих вопросов" in " ".join(by_key["full"].includes)

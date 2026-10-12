@@ -590,3 +590,106 @@ async def test_single_order_card_opens(env):
     card = session.texts()[0]
     assert f"Заявка №{order.id}" in card
     assert "Уровень:" in card
+
+
+async def place_order(dp, bot, chat: int, tier: str) -> int:
+    await feed(dp, bot, make_callback("menu:author", chat_id=chat), 1)
+    await feed(dp, bot, make_callback(f"tier:{tier}", chat_id=chat), 2)
+    await feed(dp, bot, make_callback("topic:work", chat_id=chat), 3)
+    await feed(dp, bot, make_message("Вопрос по работе", chat_id=chat), 4)
+    await feed(dp, bot, make_callback("order:nocontact", chat_id=chat), 5)
+    await feed(dp, bot, make_callback("order:submit", chat_id=chat), 6)
+    return chat
+
+
+async def answer_order(dp, bot, factory, chat: int) -> int:
+    """Автор берёт последнюю заявку этого чата и отвечает на неё."""
+    async with factory() as db:
+        order = (await Repo(db).open_order_for_user(chat))
+    await feed(
+        dp,
+        bot,
+        make_callback(f"adm:answer:{order.id}", chat_id=ADMIN_CHAT_ID, user_id=ADMIN_ID),
+        7,
+    )
+    await feed(
+        dp, bot, make_message("Вот разбор.", chat_id=ADMIN_CHAT_ID, user_id=ADMIN_ID), 8
+    )
+    return order.id
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_short_level_offers_no_followup_button(env):
+    """Лаконичный уровень уточнений не обещает — кнопки быть не должно."""
+    dp, bot, session, factory = env
+    chat = 1201
+
+    await place_order(dp, bot, chat, "short")
+    session.clear()
+    await answer_order(dp, bot, factory, chat)
+
+    to_client = [call for call in session.methods("SendMessage") if call.chat_id == chat]
+    buttons = [
+        button.callback_data
+        for call in to_client
+        if call.reply_markup
+        for row in call.reply_markup.inline_keyboard
+        for button in row
+    ]
+    assert not any(data.startswith("order:followup") for data in buttons)
+    assert any("оформите новую заявку" in (call.text or "") for call in to_client)
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_base_level_spends_its_single_followup(env):
+    dp, bot, session, factory = env
+    chat = 1202
+
+    await place_order(dp, bot, chat, "base")
+    order_id = await answer_order(dp, bot, factory, chat)
+
+    session.clear()
+    await feed(dp, bot, make_callback(f"order:followup:{order_id}", chat_id=chat), 9)
+    await feed(dp, bot, make_message("А что с деньгами?", chat_id=chat), 10)
+
+    assert any("Отправлено" in text for text in session.texts())
+    async with factory() as db:
+        assert (await Repo(db).get_order(order_id)).followups_used == 1
+
+    # Второй раз кнопка из старого сообщения уже не должна работать.
+    session.clear()
+    await feed(dp, bot, make_callback(f"order:followup:{order_id}", chat_id=chat), 11)
+
+    assert any("Уточнения по этой заявке закончились" in text for text in session.texts())
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_full_level_allows_three_then_stops(env):
+    dp, bot, session, factory = env
+    chat = 1203
+
+    await place_order(dp, bot, chat, "full")
+    order_id = await answer_order(dp, bot, factory, chat)
+
+    for number in range(3):
+        await feed(dp, bot, make_callback(f"order:followup:{order_id}", chat_id=chat), 20 + number)
+        await feed(dp, bot, make_message(f"Уточнение {number + 1}", chat_id=chat), 30 + number)
+
+    async with factory() as db:
+        assert (await Repo(db).get_order(order_id)).followups_used == 3
+
+    session.clear()
+    await feed(dp, bot, make_callback(f"order:followup:{order_id}", chat_id=chat), 40)
+    assert any("закончились" in text for text in session.texts())
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_client_is_told_about_prepayment(env):
+    dp, bot, session, _ = env
+    chat = 1204
+
+    await feed(dp, bot, make_callback("menu:author", chat_id=chat), 1)
+    session.clear()
+    await feed(dp, bot, make_callback("tier:base", chat_id=chat), 2)
+
+    assert any("до начала работы" in text for text in session.texts("EditMessageText"))

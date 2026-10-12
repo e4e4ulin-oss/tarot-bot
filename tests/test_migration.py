@@ -47,15 +47,20 @@ async def old_database(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_missing_column_is_added_without_losing_orders(old_database):
-    assert "tier" not in await columns(old_database, "orders")
+async def test_missing_columns_are_added_without_losing_orders(old_database):
+    assert {"tier", "followups_used"} & await columns(old_database, "orders") == set()
 
     await init_models(old_database)
 
-    assert "tier" in await columns(old_database, "orders")
+    assert {"tier", "followups_used"} <= await columns(old_database, "orders")
     async with old_database.begin() as conn:
-        kept = (await conn.execute(text("SELECT question, tier FROM orders WHERE id = 1"))).first()
-    assert kept == ("старая заявка", None)
+        kept = (
+            await conn.execute(
+                text("SELECT question, tier, followups_used FROM orders WHERE id = 1")
+            )
+        ).first()
+    # Уточнения у старой заявки ещё не потрачены — счётчик начинается с нуля.
+    assert kept == ("старая заявка", None, 0)
 
 
 @pytest.mark.asyncio
