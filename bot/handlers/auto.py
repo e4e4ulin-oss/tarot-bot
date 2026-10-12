@@ -10,7 +10,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, FSInputFile, InputMediaPhoto, Message
 from aiogram.utils.chat_action import ChatActionSender
 
-from .. import texts
+from .. import analytics, texts
 from ..config import Settings
 from ..db import Repo
 from ..keyboards import after_reading_menu, question_menu, spreads_menu
@@ -26,8 +26,9 @@ router = Router(name="auto")
 
 
 @router.callback_query(F.data == "menu:auto")
-async def cb_spreads(call: CallbackQuery, state: FSMContext) -> None:
+async def cb_spreads(call: CallbackQuery, state: FSMContext, repo: Repo) -> None:
     await state.clear()
+    await repo.log_event(call.from_user.id, analytics.AUTO_OPEN)
     if isinstance(call.message, Message):
         await call.message.edit_text(texts.CHOOSE_SPREAD, reply_markup=spreads_menu())
     await call.answer()
@@ -189,3 +190,4 @@ async def run_reading(
         interpretation=result.text,
         ai_used=result.ai_used,
     )
+    await repo.log_event(user_id, analytics.AUTO_READING, spread.key)

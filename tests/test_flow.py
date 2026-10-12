@@ -735,3 +735,51 @@ async def test_author_sees_the_deadline_when_taking_an_order(env, monkeypatch):
     )
 
     assert any("Ответить до: <b>сегодня в 13:00</b> (мск)" in text for text in session.texts())
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_funnel_follows_a_person_through_the_bot(env):
+    """Шаги должны отмечаться сами по ходу сценария, а не вручную в тестах."""
+    from bot import analytics
+
+    dp, bot, session, factory = env
+    chat = 1401
+
+    await feed(dp, bot, make_message("/start", chat_id=chat), 1)
+    await feed(dp, bot, make_callback("menu:author", chat_id=chat), 2)
+    await feed(dp, bot, make_callback("tier:base", chat_id=chat), 3)
+    await feed(dp, bot, make_callback("topic:work", chat_id=chat), 4)
+    await feed(dp, bot, make_message("Вопрос", chat_id=chat), 5)
+    await feed(dp, bot, make_callback("order:nocontact", chat_id=chat), 6)
+    await feed(dp, bot, make_callback("order:submit", chat_id=chat), 7)
+
+    async with factory() as db:
+        steps = await Repo(db).funnel(tuple(name for name, _ in analytics.FUNNEL))
+
+    assert steps[analytics.START] >= 1
+    assert steps[analytics.AUTHOR_OPEN] >= 1
+    assert steps[analytics.TIER_CHOSEN] >= 1
+    assert steps[analytics.ORDER_SENT] >= 1
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_stats_shows_the_funnel(env):
+    dp, bot, session, _ = env
+
+    session.clear()
+    await feed(dp, bot, make_message("/stats", chat_id=ADMIN_CHAT_ID, user_id=ADMIN_ID), 1)
+
+    report = session.texts()[0]
+    assert "Воронка за 7 дн." in report
+    assert "Зашли в бота" in report
+    assert "Отправили заявку" in report
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_stats_accepts_a_period(env):
+    dp, bot, session, _ = env
+
+    session.clear()
+    await feed(dp, bot, make_message("/stats 0", chat_id=ADMIN_CHAT_ID, user_id=ADMIN_ID), 1)
+
+    assert any("всё время" in text for text in session.texts())

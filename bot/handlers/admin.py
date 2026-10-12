@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime, timedelta
 
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
@@ -10,7 +11,7 @@ from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from .. import texts
+from .. import analytics, texts
 from ..config import Settings
 from ..db import Order, OrderStatus, Repo
 from ..filters import IsAdmin
@@ -138,6 +139,7 @@ async def deliver_answer(
 
     await state.clear()
     await repo.set_order_status(order, OrderStatus.ANSWERED, admin_id=message.from_user.id)
+    await repo.log_event(order.user_id, analytics.ORDER_ANSWERED, order.tier)
     await message.answer(texts.ADMIN_ANSWER_SENT.format(order_id=order.id))
 
 
@@ -199,9 +201,88 @@ async def cmd_order(message: Message, repo: Repo, settings: Settings) -> None:
     )
 
 
+DEFAULT_STATS_DAYS = 7
+
+
+def _period_label(days: int) -> str:
+    if days == 0:
+        return "всё время"
+    if days == 1:
+        return "сутки"
+    return f"{days} дн."
+
+
+def _funnel_table(steps: dict[str, int]) -> str:
+    """Шаги с переходами: процент считается от предыдущего шага, а не от первого."""
+    width = max(len(label) for _, label in analytics.FUNNEL)
+    lines = []
+    previous: int | None = None
+    for name, label in analytics.FUNNEL:
+        count = steps.get(name, 0)
+        share = ""
+        if previous is not None and previous > 0:
+            share = f"  {round(count / previous * 100):>3}%"
+        lines.append(f"{label:<{width}} {count:>4}{share}")
+        previous = count
+    return "\n".join(lines)
+
+
+def _tiers_block(settings: Settings, by_tier: dict[str, int]) -> str:
+    """Заявки по уровням и сколько это денег, если все они будут оплачены."""
+    if not by_tier:
+        return ""
+
+    lines, total = [], 0
+    for key, count in sorted(by_tier.items(), key=lambda item: -item[1]):
+        tier = find_tier(settings, key)
+        if tier is None:  # заявки без уровня — считать по ним деньги не из чего
+            lines.append(f"Без уровня: {count}")
+            continue
+        money = tier.price * count
+        total += money
+        lines.append(
+            texts.ADMIN_STATS_TIER_LINE.format(
+                title=tier.title,
+                count=count,
+                price=tier.price_label(settings.author_currency),
+                sum=f"{money} {settings.author_currency}",
+            )
+        )
+
+    total_line = (
+        texts.ADMIN_STATS_TIER_TOTAL.format(sum=f"{total} {settings.author_currency}")
+        if total
+        else ""
+    )
+    return texts.ADMIN_STATS_TIERS.format(lines="\n".join(lines), total=total_line)
+
+
 @router.message(Command("stats"))
-async def cmd_stats(message: Message, repo: Repo) -> None:
-    await message.answer(texts.ADMIN_STATS.format(**await repo.stats()))
+async def cmd_stats(
+    message: Message, repo: Repo, command: CommandObject, settings: Settings
+) -> None:
+    days = DEFAULT_STATS_DAYS
+    if command.args and command.args.strip().isdigit():
+        days = int(command.args.strip())
+
+    since = None if days == 0 else datetime.now(UTC) - timedelta(days=days)
+    steps = await repo.funnel(tuple(name for name, _ in analytics.FUNNEL), since)
+    period = _period_label(days)
+
+    if not any(steps.values()):
+        await message.answer(texts.ADMIN_STATS_EMPTY.format(period=period))
+        return
+
+    tiers_block = _tiers_block(settings, await repo.orders_by_tier(since))
+
+    await message.answer(
+        texts.ADMIN_STATS.format(
+            period=period,
+            funnel=_funnel_table(steps),
+            orders_by_tier=tiers_block,
+            **await repo.stats(),
+        )
+    )
 
 
 @router.message(Command("diag"))

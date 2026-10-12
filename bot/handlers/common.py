@@ -7,7 +7,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from .. import texts
+from .. import analytics, texts
 from ..config import Settings
 from ..db import Repo
 from ..keyboards import back_to_menu, main_menu
@@ -29,8 +29,10 @@ async def show_main_menu(message: Message, settings: Settings, *, edit: bool = F
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, state: FSMContext, settings: Settings) -> None:
+async def cmd_start(message: Message, state: FSMContext, settings: Settings, repo: Repo) -> None:
     await state.clear()
+    if message.from_user is not None:
+        await repo.log_event(message.from_user.id, analytics.START)
     await show_main_menu(message, settings)
 
 

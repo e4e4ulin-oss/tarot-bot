@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import CardImage, Order, OrderStatus, Reading, ReadingMode, User, utcnow
+from .models import CardImage, Event, Order, OrderStatus, Reading, ReadingMode, User, utcnow
 
 
 class Repo:
@@ -160,6 +160,28 @@ class Repo:
         return order
 
     # --- Статистика для админа ------------------------------------------
+    # --- Воронка ---------------------------------------------------------
+    async def log_event(self, user_id: int, name: str, detail: str | None = None) -> None:
+        """Отмечает шаг воронки. Ошибка здесь не должна ломать сценарий."""
+        self.session.add(Event(user_id=user_id, name=name, detail=detail))
+        await self.session.commit()
+
+    async def funnel(self, names: tuple[str, ...], since: datetime | None = None) -> dict[str, int]:
+        """Сколько разных людей дошло до каждого шага."""
+        query = select(Event.name, func.count(func.distinct(Event.user_id))).group_by(Event.name)
+        if since is not None:
+            query = query.where(Event.created_at >= since)
+        rows = (await self.session.execute(query)).all()
+        counted = {name: int(count) for name, count in rows}
+        return {name: counted.get(name, 0) for name in names}
+
+    async def orders_by_tier(self, since: datetime | None = None) -> dict[str, int]:
+        query = select(Order.tier, func.count()).group_by(Order.tier)
+        if since is not None:
+            query = query.where(Order.created_at >= since)
+        rows = (await self.session.execute(query)).all()
+        return {(tier or "не выбран"): int(count) for tier, count in rows}
+
     async def stats(self) -> dict[str, int]:
         users = int(await self.session.scalar(select(func.count()).select_from(User)) or 0)
         readings = int(await self.session.scalar(select(func.count()).select_from(Reading)) or 0)

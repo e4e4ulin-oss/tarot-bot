@@ -120,3 +120,22 @@ class Order(Base):
     @property
     def is_open(self) -> bool:
         return self.status in (OrderStatus.NEW, OrderStatus.IN_PROGRESS)
+
+
+class Event(Base):
+    """Шаг воронки: кто и когда дошёл до очередного этапа.
+
+    Считаем именно шаги, а не нажатия: один человек может открыть авторский разбор
+    трижды, но в воронке он один.
+    """
+
+    __tablename__ = "events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    name: Mapped[str] = mapped_column(String(32), index=True)
+    # Подробность шага: уровень разбора, ключ расклада — что уместно
+    detail: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, index=True
+    )

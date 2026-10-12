@@ -9,7 +9,7 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from .. import texts
+from .. import analytics, texts
 from ..config import Settings
 from ..db import Order, OrderStatus, Repo
 from ..keyboards import (
@@ -42,6 +42,7 @@ router = Router(name="author")
 @router.callback_query(F.data == "menu:author")
 async def cb_author(call: CallbackQuery, state: FSMContext, repo: Repo, settings: Settings) -> None:
     await state.clear()
+    await repo.log_event(call.from_user.id, analytics.AUTHOR_OPEN)
     existing = await repo.open_order_for_user(call.from_user.id)
     if existing is not None:
         if isinstance(call.message, Message):
@@ -83,13 +84,16 @@ def _tier_block(tier: Tier, settings: Settings) -> str:
 
 
 @router.callback_query(F.data.startswith("tier:"))
-async def cb_tier(call: CallbackQuery, state: FSMContext, settings: Settings) -> None:
+async def cb_tier(
+    call: CallbackQuery, state: FSMContext, settings: Settings, repo: Repo
+) -> None:
     tier = find_tier(settings, call.data.split(":", 1)[1])
     if tier is None:
         await call.answer(texts.ERROR, show_alert=True)
         return
 
     await state.update_data(tier=tier.key)
+    await repo.log_event(call.from_user.id, analytics.TIER_CHOSEN, tier.key)
     chosen = texts.AUTHOR_TIER_CHOSEN.format(
         title=texts.esc(tier.title),
         price=texts.esc(tier.price_label(settings.author_currency)),
@@ -198,6 +202,7 @@ async def cb_submit(
         tier=data.get("tier"),
     )
     await state.clear()
+    await repo.log_event(call.from_user.id, analytics.ORDER_SENT, order.tier)
 
     await notify_admin_new_order(
         bot, settings, repo, order, call.from_user.full_name, call.from_user.username

@@ -204,11 +204,24 @@ ADMIN_ORDER_LINE = "№{order_id} · {status} · {tier} · {date}\n{user}: {ques
 ADMIN_FOLLOWUP = "💬 <b>Уточнение по заявке №{order_id}</b>\nОт: {user}\n\n{text}"
 
 ADMIN_STATS = (
-    "<b>Статистика</b>\n\n"
-    "Пользователей: {users}\n"
-    "Раскладов: {readings}\n"
-    "Заявок всего: {orders}\n"
-    "Открытых заявок: {open_orders}"
+    "<b>Воронка за {period}</b>\n"
+    "<pre>{funnel}</pre>\n"
+    "{orders_by_tier}"
+    "<b>Всего за всё время</b>\n"
+    "Людей: {users} · раскладов: {readings} · заявок: {orders} (открытых {open_orders})\n\n"
+    "<i>Период: /stats 1 — сутки, /stats 30 — месяц, /stats 0 — всё время.</i>"
+)
+
+ADMIN_STATS_TIERS = "<b>Заявки по уровням</b>\n{lines}\n{total}\n\n"
+
+ADMIN_STATS_TIER_LINE = "{title}: {count} × {price} = {sum}"
+
+ADMIN_STATS_TIER_TOTAL = "<b>Итого по заявкам: {sum}</b> — если все будут оплачены."
+
+ADMIN_STATS_EMPTY = (
+    "За {period} событий не было.\n\n"
+    "Воронка начала заполняться только после обновления бота — "
+    "если обновление было недавно, данных пока нет."
 )
 
 # --- Управление сервером из Telegram -----------------------------------------
