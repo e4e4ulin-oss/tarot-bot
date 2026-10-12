@@ -38,7 +38,10 @@ async def show_card(
     else:
         await message.answer(text, reply_markup=markup)
 
-    await send_card_images(message.bot, message.chat.id, [drawn], repo, settings)
+    # Картинка — только при первом открытии за день: карта та же, и вторая копия
+    # в чате ничего не добавляет.
+    if existing is None:
+        await send_card_images(message.bot, message.chat.id, [drawn], repo, settings)
 
 
 @router.callback_query(F.data == "daily:open")

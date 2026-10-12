@@ -836,3 +836,20 @@ async def test_main_menu_offers_the_daily_card(env):
         for button in row
     ]
     assert "daily:open" in buttons
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_daily_card_image_is_sent_once_a_day(env):
+    """Карта та же — значит и картинку второй раз слать незачем."""
+    dp, bot, session, _ = env
+    chat = 1504
+
+    session.clear()
+    await feed(dp, bot, make_callback("daily:open", chat_id=chat), 1)
+    first_pass = len(session.methods("SendMediaGroup"))
+
+    await feed(dp, bot, make_callback("daily:open", chat_id=chat), 2)
+    await feed(dp, bot, make_callback("daily:open", chat_id=chat), 3)
+
+    assert first_pass == 1
+    assert len(session.methods("SendMediaGroup")) == 1
