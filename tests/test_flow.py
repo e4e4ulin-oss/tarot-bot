@@ -853,3 +853,61 @@ async def test_daily_card_image_is_sent_once_a_day(env):
 
     assert first_pass == 1
     assert len(session.methods("SendMediaGroup")) == 1
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_reversed_card_is_sent_upside_down_and_cached_apart(env, monkeypatch):
+    """Подпись говорит «перевёрнутая» — картинка должна говорить то же самое."""
+    from aiogram.types import BufferedInputFile
+
+    from bot.handlers.auto import send_card_images
+    from bot.tarot import DrawnCard, get_card
+    from bot.tarot.images import cache_key
+
+    async def turned(card):
+        return "перевёрнутая картинка".encode()
+
+    monkeypatch.setattr("bot.handlers.auto.reversed_image_bytes", turned)
+
+    dp, bot, session, factory = env
+    card = get_card("major_18")
+    drawn = [DrawnCard(position="Карта дня", card=card, reversed=True)]
+
+    session.clear()
+    async with factory() as db:
+        await send_card_images(bot, 1601, drawn, Repo(db), dp["settings"])
+
+    media = session.methods("SendMediaGroup")[0].media
+    assert isinstance(media[0].media, BufferedInputFile)
+
+    async with factory() as db:
+        cached = await Repo(db).card_file_ids([cache_key(card, True), cache_key(card, False)])
+    # Перевёрнутый файл сохранён отдельно и не подменяет прямой
+    assert cache_key(card, True) in cached
+    assert cache_key(card, False) not in cached
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_unrotatable_card_falls_back_without_poisoning_the_cache(env, monkeypatch):
+    """Если повернуть не вышло, прямую картинку нельзя запомнить как перевёрнутую."""
+    from bot.handlers.auto import send_card_images
+    from bot.tarot import DrawnCard, get_card
+    from bot.tarot.images import cache_key
+
+    async def nothing(card):
+        return None
+
+    monkeypatch.setattr("bot.handlers.auto.reversed_image_bytes", nothing)
+
+    dp, bot, session, factory = env
+    card = get_card("major_17")
+    drawn = [DrawnCard(position="Карта дня", card=card, reversed=True)]
+
+    session.clear()
+    async with factory() as db:
+        await send_card_images(bot, 1602, drawn, Repo(db), dp["settings"])
+
+    assert len(session.methods("SendMediaGroup")) == 1  # картинка всё же ушла
+    async with factory() as db:
+        cached = await Repo(db).card_file_ids([cache_key(card, True)])
+    assert cached == {}
