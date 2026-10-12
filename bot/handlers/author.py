@@ -19,9 +19,11 @@ from ..keyboards import (
     confirm_order_menu,
     contact_menu,
     main_menu,
+    tiers_menu,
     topics_menu,
 )
 from ..states import AuthorFlow
+from ..tiers import Tier, find_tier, tier_label, tiers
 from ..utils import fmt_date
 
 logger = logging.getLogger(__name__)
@@ -44,13 +46,49 @@ async def cb_author(call: CallbackQuery, state: FSMContext, repo: Repo, settings
         await call.answer()
         return
 
+    available = tiers(settings)
     intro = texts.AUTHOR_INTRO.format(author=settings.author_name)
+    if available:
+        intro += "\n\n" + "\n\n".join(_tier_block(tier, settings) for tier in available)
     if settings.author_price_text:
         intro += texts.AUTHOR_PRICE.format(price=texts.esc(settings.author_price_text))
-    intro += f"\n\n{texts.AUTHOR_ASK_TOPIC}"
+
+    # Уровней может не быть вовсе: тогда заявка оформляется как раньше, без выбора.
+    if available:
+        intro += f"\n\n{texts.AUTHOR_ASK_TIER}"
+        markup = tiers_menu(available, settings.author_currency)
+    else:
+        intro += f"\n\n{texts.AUTHOR_ASK_TOPIC}"
+        markup = topics_menu()
 
     if isinstance(call.message, Message):
-        await call.message.edit_text(intro, reply_markup=topics_menu())
+        await call.message.edit_text(intro, reply_markup=markup)
+    await call.answer()
+
+
+def _tier_block(tier: Tier, settings: Settings) -> str:
+    return texts.AUTHOR_TIER_BLOCK.format(
+        title=texts.esc(tier.title),
+        price=texts.esc(tier.price_label(settings.author_currency)),
+        includes="\n".join(f"• {texts.esc(line)}" for line in tier.includes),
+    )
+
+
+@router.callback_query(F.data.startswith("tier:"))
+async def cb_tier(call: CallbackQuery, state: FSMContext, settings: Settings) -> None:
+    tier = find_tier(settings, call.data.split(":", 1)[1])
+    if tier is None:
+        await call.answer(texts.ERROR, show_alert=True)
+        return
+
+    await state.update_data(tier=tier.key)
+    chosen = texts.AUTHOR_TIER_CHOSEN.format(
+        title=texts.esc(tier.title),
+        price=texts.esc(tier.price_label(settings.author_currency)),
+        includes="\n".join(f"• {texts.esc(line)}" for line in tier.includes),
+    )
+    if isinstance(call.message, Message):
+        await call.message.edit_text(chosen + texts.AUTHOR_ASK_TOPIC, reply_markup=topics_menu())
     await call.answer()
 
 
@@ -87,24 +125,25 @@ async def on_non_text_question(message: Message) -> None:
 
 
 @router.message(AuthorFlow.waiting_contact, F.text)
-async def on_contact(message: Message, state: FSMContext) -> None:
+async def on_contact(message: Message, state: FSMContext, settings: Settings) -> None:
     await state.update_data(contact=(message.text or "").strip()[:128])
-    await _show_confirm(message, state)
+    await _show_confirm(message, state, settings)
 
 
 @router.callback_query(AuthorFlow.waiting_contact, F.data == "order:nocontact")
-async def cb_no_contact(call: CallbackQuery, state: FSMContext) -> None:
+async def cb_no_contact(call: CallbackQuery, state: FSMContext, settings: Settings) -> None:
     await state.update_data(contact=None)
     if isinstance(call.message, Message):
-        await _show_confirm(call.message, state)
+        await _show_confirm(call.message, state, settings)
     await call.answer()
 
 
-async def _show_confirm(message: Message, state: FSMContext) -> None:
+async def _show_confirm(message: Message, state: FSMContext, settings: Settings) -> None:
     data = await state.get_data()
     await state.set_state(AuthorFlow.confirming)
     await message.answer(
         texts.AUTHOR_CONFIRM.format(
+            tier=texts.esc(tier_label(settings, data.get("tier"))),
             topic=texts.esc(texts.topic_label(data.get("topic"))),
             question=texts.esc(data.get("question", "")),
             contact=texts.esc(data.get("contact")) or "не указан",
@@ -146,6 +185,7 @@ async def cb_submit(
         question=question,
         topic=data.get("topic"),
         contact=data.get("contact"),
+        tier=data.get("tier"),
     )
     await state.clear()
 
@@ -200,6 +240,7 @@ async def notify_admin_new_order(
         settings,
         texts.ADMIN_NEW_ORDER.format(
             order_id=order.id,
+            tier=texts.esc(tier_label(settings, order.tier)),
             user=user_line,
             user_id=order.user_id,
             topic=texts.esc(texts.topic_label(order.topic)),

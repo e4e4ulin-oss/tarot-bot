@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from .tarot import SPREAD_ORDER, SPREADS
 from .texts import TOPICS
+from .tiers import Tier
 
 
 def main_menu(author_name: str) -> InlineKeyboardMarkup:
@@ -43,6 +46,15 @@ def after_reading_menu(author_name: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="🔮 Ещё расклад", callback_data="menu:auto")
     builder.button(text="✍️ Авторский разбор", callback_data="menu:author")
+    builder.button(text="‹ Меню", callback_data="menu:main")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def tiers_menu(options: Sequence[Tier], currency: str = "₽") -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for tier in options:
+        builder.button(text=tier.button_label(currency), callback_data=f"tier:{tier.key}")
     builder.button(text="‹ Меню", callback_data="menu:main")
     builder.adjust(1)
     return builder.as_markup()

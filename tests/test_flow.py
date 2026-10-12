@@ -523,3 +523,70 @@ async def test_service_commands_are_closed_to_everyone_else(env, server):
     assert server.restarts == 0
     assert server.asked_lines == []
     assert all("только автору" in text for text in session.texts())
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_author_flow_starts_with_prices(env):
+    """Цену человек видит до того, как напишет вопрос, а не после."""
+    dp, bot, session, _ = env
+
+    await feed(dp, bot, make_callback("menu:author", chat_id=1101), 1)
+
+    shown = session.texts("EditMessageText")[-1]
+    assert "Лаконичный" in shown and "500 ₽" in shown
+    assert "Базовый" in shown and "700 ₽" in shown
+    assert "Полный" in shown and "1000 ₽" in shown
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_chosen_level_reaches_the_order_and_the_author(env):
+    dp, bot, session, factory = env
+    chat = 1102
+
+    await feed(dp, bot, make_callback("menu:author", chat_id=chat), 1)
+    await feed(dp, bot, make_callback("tier:full", chat_id=chat), 2)
+    await feed(dp, bot, make_callback("topic:love", chat_id=chat), 3)
+    await feed(dp, bot, make_message("Что у нас дальше?", chat_id=chat), 4)
+    await feed(dp, bot, make_callback("order:nocontact", chat_id=chat), 5)
+
+    confirm = session.texts()[-1]
+    assert "Полный · 1000 ₽" in confirm
+
+    session.clear()
+    await feed(dp, bot, make_callback("order:submit", chat_id=chat), 6)
+
+    async with factory() as db:
+        order = (await Repo(db).open_orders())[-1]
+    assert order.tier == "full"
+
+    for_author = [text for text in session.texts() if "Заявка" in text]
+    assert for_author and "Полный · 1000 ₽" in for_author[0]
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_orders_list_shows_levels(env):
+    """В /orders видно, за какие деньги каждая заявка — иначе их не разложить по приоритету."""
+    dp, bot, session, _ = env
+
+    session.clear()
+    await feed(dp, bot, make_message("/orders", chat_id=ADMIN_CHAT_ID, user_id=ADMIN_ID), 1)
+
+    listing = session.texts()[0]
+    assert "Открытые заявки" in listing
+    assert "·" in listing
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_single_order_card_opens(env):
+    dp, bot, session, factory = env
+    async with factory() as db:
+        order = (await Repo(db).open_orders())[-1]
+
+    session.clear()
+    await feed(
+        dp, bot, make_message(f"/order {order.id}", chat_id=ADMIN_CHAT_ID, user_id=ADMIN_ID), 1
+    )
+
+    card = session.texts()[0]
+    assert f"Заявка №{order.id}" in card
+    assert "Уровень:" in card

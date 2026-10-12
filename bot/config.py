@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     # Как бот называет того, кто делает авторские разборы: имя или просто «таролог»
     author_name: str = Field(default="таролог", alias="AUTHOR_NAME")
     author_price_text: str = Field(default="", alias="AUTHOR_PRICE_TEXT")
+    # Цены уровней авторского разбора. 0 — уровень не предлагается клиенту.
+    author_price_short: int = Field(default=500, alias="AUTHOR_PRICE_SHORT")
+    author_price_base: int = Field(default=700, alias="AUTHOR_PRICE_BASE")
+    author_price_full: int = Field(default=1000, alias="AUTHOR_PRICE_FULL")
+    author_currency: str = Field(default="₽", alias="AUTHOR_CURRENCY")
 
     # --- Языковая модель ---
     # Любой OpenAI-совместимый провайдер: xAI, Groq, Google Gemini, OpenRouter, Cerebras.

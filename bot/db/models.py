@@ -96,6 +96,8 @@ class Order(Base):
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
     question: Mapped[str] = mapped_column(Text)
     topic: Mapped[str | None] = mapped_column(String(64))
+    # Уровень разбора на момент заявки: short | base | full
+    tier: Mapped[str | None] = mapped_column(String(16))
     contact: Mapped[str | None] = mapped_column(String(128))
     status: Mapped[OrderStatus] = mapped_column(
         Enum(OrderStatus), default=OrderStatus.NEW, index=True

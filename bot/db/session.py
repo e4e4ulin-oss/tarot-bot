@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
+from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -12,6 +14,12 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from .models import Base
+
+logger = logging.getLogger(__name__)
+
+# Колонки, добавленные к уже существующим таблицам. create_all() обходит таблицу,
+# если она есть, поэтому у работающего бота новые поля надо дописывать самим.
+ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (("orders", "tier", "VARCHAR(16)"),)
 
 
 def _ensure_sqlite_dir(url: str) -> None:
@@ -32,6 +40,19 @@ def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSessi
     return async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
+def _add_missing_columns(conn) -> None:
+    inspector = inspect(conn)
+    tables = set(inspector.get_table_names())
+    for table, column, column_type in ADDED_COLUMNS:
+        if table not in tables:
+            continue  # create_all уже создал её целиком
+        if column in {existing["name"] for existing in inspector.get_columns(table)}:
+            continue
+        logger.info("Добавляю колонку %s.%s", table, column)
+        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}"))
+
+
 async def init_models(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
+        await conn.run_sync(_add_missing_columns)
         await conn.run_sync(Base.metadata.create_all)

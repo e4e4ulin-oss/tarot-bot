@@ -93,9 +93,17 @@ class Repo:
 
     # --- Заявки на авторский разбор -------------------------------------
     async def create_order(
-        self, *, user_id: int, question: str, topic: str | None, contact: str | None
+        self,
+        *,
+        user_id: int,
+        question: str,
+        topic: str | None,
+        contact: str | None,
+        tier: str | None = None,
     ) -> Order:
-        order = Order(user_id=user_id, question=question, topic=topic, contact=contact)
+        order = Order(
+            user_id=user_id, question=question, topic=topic, contact=contact, tier=tier
+        )
         self.session.add(order)
         await self.session.commit()
         return order

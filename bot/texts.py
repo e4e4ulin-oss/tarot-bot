@@ -75,7 +75,16 @@ AUTHOR_INTRO = (
     "Чем больше контекста, тем полезнее разбор."
 )
 
-AUTHOR_PRICE = "\n\n<b>Стоимость и сроки:</b> {price}"
+AUTHOR_PRICE = "\n\n<b>Условия:</b> {price}"
+
+AUTHOR_ASK_TIER = "Выберите уровень разбора:"
+
+AUTHOR_TIER_BLOCK = "<b>{title} · {price}</b>\n{includes}"
+
+AUTHOR_TIER_CHOSEN = (
+    "<b>{title} · {price}</b>\n{includes}\n\n"
+    "Оплата — после того, как разбор будет готов и вы его получите.\n\n"
+)
 
 AUTHOR_ASK_TOPIC = "Выберите тему разбора:"
 
@@ -86,6 +95,7 @@ AUTHOR_ASK_CONTACT = (
 
 AUTHOR_CONFIRM = (
     "<b>Проверьте заявку</b>\n\n"
+    "<b>Уровень:</b> {tier}\n"
     "<b>Тема:</b> {topic}\n"
     "<b>Вопрос:</b> {question}\n"
     "<b>Контакт:</b> {contact}\n\n"
@@ -134,6 +144,7 @@ TOO_FAST = "Слишком быстро — секунду, пожалуйста
 
 ADMIN_NEW_ORDER = (
     "🆕 <b>Заявка №{order_id}</b>\n\n"
+    "<b>Уровень:</b> {tier}\n"
     "<b>От:</b> {user}\n"
     "<b>ID:</b> <code>{user_id}</code>\n"
     "<b>Тема:</b> {topic}\n"
@@ -163,7 +174,7 @@ ADMIN_NO_ORDERS = "Открытых заявок нет."
 
 ADMIN_ORDERS_HEADER = "<b>Открытые заявки</b>"
 
-ADMIN_ORDER_LINE = "№{order_id} · {status} · {date}\n{user}: {question}"
+ADMIN_ORDER_LINE = "№{order_id} · {status} · {tier} · {date}\n{user}: {question}"
 
 ADMIN_FOLLOWUP = "💬 <b>Уточнение по заявке №{order_id}</b>\nОт: {user}\n\n{text}"
 

@@ -18,6 +18,7 @@ from ..keyboards import admin_order_menu, followup_menu
 from ..services import UPDATE_APPLIED, GrokError, Interpreter, ServerOps
 from ..services.server import LOGS_DEFAULT, LOGS_MAX, LOGS_MIN
 from ..states import AdminFlow
+from ..tiers import tier_label
 from ..utils import fmt_date
 
 logger = logging.getLogger(__name__)
@@ -121,7 +122,7 @@ async def deliver_answer(
 
 
 @router.message(Command("orders"))
-async def cmd_orders(message: Message, repo: Repo) -> None:
+async def cmd_orders(message: Message, repo: Repo, settings: Settings) -> None:
     orders = await repo.open_orders()
     if not orders:
         await message.answer(texts.ADMIN_NO_ORDERS)
@@ -134,6 +135,7 @@ async def cmd_orders(message: Message, repo: Repo) -> None:
             texts.ADMIN_ORDER_LINE.format(
                 order_id=order.id,
                 status=order.status_label,
+                tier=texts.esc(tier_label(settings, order.tier)),
                 date=fmt_date(order.created_at),
                 user=texts.esc(user.display if user else str(order.user_id)),
                 question=texts.esc(texts.short(order.question, 140)),
@@ -150,7 +152,7 @@ async def cmd_orders(message: Message, repo: Repo) -> None:
 
 
 @router.message(Command("order"))
-async def cmd_order(message: Message, repo: Repo) -> None:
+async def cmd_order(message: Message, repo: Repo, settings: Settings) -> None:
     parts = (message.text or "").split()
     if len(parts) < 2 or not parts[1].isdigit():
         await message.answer("Использование: /order &lt;номер заявки&gt;")
@@ -165,6 +167,7 @@ async def cmd_order(message: Message, repo: Repo) -> None:
     await message.answer(
         texts.ADMIN_NEW_ORDER.format(
             order_id=order.id,
+            tier=texts.esc(tier_label(settings, order.tier)),
             user=texts.esc(user.display if user else "—"),
             user_id=order.user_id,
             topic=texts.esc(texts.topic_label(order.topic)),
