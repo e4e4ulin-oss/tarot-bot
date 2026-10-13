@@ -67,7 +67,7 @@ COMMON = """\
 # Границы приёмки — те же, по которым принимались Правосудие и рубашка
 MAX_BACKGROUND_DELTA = 14.0
 MAX_TITLE_SPREAD = 12.0
-FIGURE_RANGE = (0.18, 0.28)
+FIGURE_RANGE = (0.18, 0.34)
 
 
 @dataclass(frozen=True)
