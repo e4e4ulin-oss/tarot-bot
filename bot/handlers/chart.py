@@ -17,7 +17,7 @@ from aiogram.types import CallbackQuery, Message
 from .. import texts
 from ..db import Repo
 from ..keyboards import back_to_menu
-from ..natal import Full, forecast, full
+from ..natal import Full, forecast, full, timeline
 from ..profile import describe, stored_place
 from ..services import GrokError, Interpreter
 
@@ -79,12 +79,17 @@ async def send_forecast(
         await message.answer(texts.CHART_NEEDS_DATE, reply_markup=back_to_menu())
         return
 
-    moving = forecast(card, datetime.now(UTC).replace(tzinfo=None))
+    now = datetime.now(UTC).replace(tzinfo=None)
+    moving = forecast(card, now)
     if not moving:
         await message.answer(texts.FORECAST_QUIET, reply_markup=back_to_menu())
         return
 
-    body = "\n".join(str(transit) for transit in moving)
+    # К каждому транзиту — срок: иначе «сейчас квадрат» читается одинаково
+    # и для недели, и для полугода
+    body = "\n".join(
+        f"{transit}\n   {timeline(transit, card, now)}" for transit in moving
+    )
     user = await repo.get_user(user_id)
 
     try:

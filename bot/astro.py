@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import ephem
 
@@ -246,3 +246,104 @@ def transits(
                     )
                     break
     return sorted(found, key=lambda transit: transit.exact)
+
+
+# Докуда заглядывать вперёд и назад, когда ищем границы транзита. Полтора
+# года покрывают все возвраты медленных планет из-за попятного хода: дольше
+# на одном градусе не стоит никто.
+HORIZON = 540
+CODE_BY_NAME = {name: code for code, name in PLANETS}
+
+
+@dataclass(frozen=True)
+class Timing:
+    """Жизнь одного транзита во времени."""
+
+    exact: list[datetime]  # когда аспект точен, по порядку
+    entered: datetime | None  # когда вошёл в орб
+    leaves: datetime | None  # когда выйдет
+
+
+def _degrees_of(code: str, moment: datetime) -> float:
+    """Долгота планеты по имени в ephem — для поиска сроков транзита."""
+    return math.degrees(ephem.Ecliptic(getattr(ephem, code)(ephem.Date(moment))).lon) % 360
+
+
+def _signed(value: float) -> float:
+    """Угол, приведённый к отрезку от минус ста восьмидесяти до ста восьмидесяти."""
+    return (value + 180) % 360 - 180
+
+
+def _branch(code: str, natal: float, angle: float, moment: datetime) -> int:
+    """Аспект точен в двух положениях планеты; выбираем то, к которому ближе.
+
+    Без этого выбора функция расстояния не меняет знак на точном аспекте, и
+    момент точности не находится вовсе.
+    """
+    delta = _signed(_degrees_of(code, moment) - natal)
+    return 1 if abs(_signed(delta - angle)) <= abs(_signed(delta + angle)) else -1
+
+
+def _offset(code: str, natal: float, angle: float, moment: datetime, branch: int = 1) -> float:
+    """Насколько далеко до точного аспекта, со знаком."""
+    return _signed(_signed(_degrees_of(code, moment) - natal) - branch * angle)
+
+
+def _refine(
+    code: str, natal: float, angle: float, left: datetime, right: datetime, branch: int
+) -> datetime:
+    """Делением пополам доводит момент точного аспекта до часа."""
+    for _ in range(12):
+        middle = left + (right - left) / 2
+        if _offset(code, natal, angle, left, branch) * _offset(
+            code, natal, angle, middle, branch
+        ) <= 0:
+            right = middle
+        else:
+            left = middle
+    return left + (right - left) / 2
+
+
+def timing(
+    planet: str,
+    natal: float,
+    angle: float,
+    now: datetime,
+    *,
+    orb: float = TRANSIT_ORB,
+    horizon: int = HORIZON,
+) -> Timing:
+    """Когда транзит был точен, когда вошёл в орб и когда выйдет.
+
+    Считается перебором по эфемеридам с шагом в сутки: медленная планета за
+    сутки проходит доли градуса и орб перескочить не может.
+    """
+    code = CODE_BY_NAME[planet]
+    branch = _branch(code, natal, angle, now)
+    days = [now + timedelta(days=step) for step in range(-horizon, horizon + 1)]
+    offsets = [_offset(code, natal, angle, day, branch) for day in days]
+
+    exact = [
+        _refine(code, natal, angle, days[index], days[index + 1], branch)
+        for index in range(len(days) - 1)
+        # Знак меняется только на точном аспекте; скачок через полкруга —
+        # это другая сторона зодиака, а не точность
+        if offsets[index] * offsets[index + 1] <= 0
+        and abs(offsets[index] - offsets[index + 1]) < 90
+    ]
+
+    inside = [index for index, value in enumerate(offsets) if abs(value) <= orb]
+    entered = leaves = None
+    if inside:
+        # Нас интересует тот заход в орб, в котором мы сейчас
+        here = horizon
+        first = here
+        while first - 1 in inside:
+            first -= 1
+        last = here
+        while last + 1 in inside:
+            last += 1
+        entered = days[first] if first > 0 else None
+        leaves = days[last] if last < len(days) - 1 else None
+
+    return Timing(exact=exact, entered=entered, leaves=leaves)
