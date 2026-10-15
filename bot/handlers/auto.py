@@ -17,9 +17,17 @@ from aiogram.types import (
 from aiogram.utils.chat_action import ChatActionSender
 
 from .. import analytics, texts
+from ..access import check as check_access
+from ..access import spend as spend_access
 from ..config import Settings
 from ..db import Repo
-from ..keyboards import after_reading_menu, question_menu, spreads_menu
+from ..keyboards import (
+    after_reading_menu,
+    paywall_menu,
+    question_menu,
+    spreads_menu,
+    subscribe_menu,
+)
 from ..services.interpreter import DISCLAIMER, Interpreter
 from ..states import AutoFlow
 from ..tarot import SPREADS, DrawnCard, Spread, draw_spread, format_cards, get_spread, serialize
@@ -169,7 +177,25 @@ async def run_reading(
     settings: Settings,
     interpreter: Interpreter,
 ) -> None:
-    """Общий сценарий: лимит → карты → разбор → сохранение."""
+    """Общий сценарий: доступ → лимит → карты → разбор → сохранение."""
+    access = await check_access(repo, settings, user_id)
+    if not access.allowed:
+        await repo.log_event(user_id, analytics.PAYWALL, access.reason)
+        if access.reason == "needs_daily":
+            await message.answer(texts.NEEDS_DAILY, reply_markup=subscribe_menu())
+        elif not settings.payment_provider_token:
+            await message.answer(texts.PAYMENT_NOT_READY.format(author=settings.author_name))
+        else:
+            await message.answer(
+                texts.FREE_SPENT.format(
+                    total=settings.free_auto_readings,
+                    price=settings.auto_reading_price,
+                    currency=settings.author_currency,
+                ),
+                reply_markup=paywall_menu(settings.auto_reading_price, settings.author_currency),
+            )
+        return
+
     if settings.daily_auto_limit > 0:
         used = await repo.count_readings_today(user_id)
         if used >= settings.daily_auto_limit:
@@ -218,3 +244,5 @@ async def run_reading(
         ai_used=result.ai_used,
     )
     await repo.log_event(user_id, analytics.AUTO_READING, spread.key)
+    # Списываем только теперь: если расклад не состоялся, оплата остаётся
+    await spend_access(repo, access)

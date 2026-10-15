@@ -2,7 +2,7 @@
 
 from aiogram import Router
 
-from . import admin, author, auto, common, daily, miniapp
+from . import admin, author, auto, common, daily, miniapp, payments
 
 # Роутеры объявлены на уровне модулей, поэтому собрать корневой роутер можно один раз за процесс.
 ROUTERS: tuple[Router, ...] = (
@@ -12,6 +12,7 @@ ROUTERS: tuple[Router, ...] = (
     auto.router,
     author.router,
     miniapp.router,
+    payments.router,
     common.fallback_router,
 )
 
