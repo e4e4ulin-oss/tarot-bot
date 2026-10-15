@@ -327,10 +327,30 @@ async def cmd_diag(message: Message, settings: Settings, interpreter: Interprete
         lines[-1] = f"Ключ: ✅ работает (ответ модели: «{texts.esc(reply[:40])}»)"
     except GrokError as exc:
         lines[-1] = (
-            f"Ключ: ❌ модель не отвечает.\n<code>{texts.esc(str(exc)[:300])}</code>\n\n"
-            "Частые причины: неверный ключ, нулевой баланс у провайдера, "
-            "недоступная модель или блокировка по региону."
+            f"Ключ: ❌ модель не отвечает.\n<code>{texts.esc(str(exc)[:300])}</code>"
         )
+        # Провайдер отказал осознанно — чаще всего из-за имени модели.
+        # Спросим у него же, что он готов дать этому ключу
+        try:
+            available = await interpreter.grok.models()
+        except GrokError:
+            available = []
+
+        if available:
+            lines.append("")
+            lines.append("<b>Доступные модели</b>")
+            lines.append(f"<code>{texts.esc(', '.join(available[:20]))}</code>")
+            lines.append("")
+            lines.append(
+                "Если нужной в списке нет, впишите в <code>.env</code> "
+                "подходящую: <code>AI_MODEL=…</code>"
+            )
+        else:
+            lines.append("")
+            lines.append(
+                "Частые причины: неверный ключ, нулевой баланс у провайдера, "
+                "недоступная модель или блокировка по региону."
+            )
 
     await status.edit_text("\n".join(lines))
 

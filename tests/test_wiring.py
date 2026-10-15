@@ -159,3 +159,45 @@ def test_every_module_has_what_it_calls():
             broken[info.name] = missing
 
     assert not broken, f"вызывают то, чего не импортировали: {broken}"
+
+
+def test_the_refusal_keeps_the_provider_explanation():
+    """400 без объяснения — это гадание; объяснение приходит в теле ответа."""
+    import httpx
+
+    from bot.services.grok import _explain
+
+    body = {"error": {"message": "The model `grok-4` does not exist"}}
+    assert "does not exist" in _explain(httpx.Response(400, json=body))
+
+    plain = httpx.Response(400, text="Insufficient credits")
+    assert "Insufficient credits" in _explain(plain)
+
+    assert _explain(httpx.Response(400, text="")) == "без объяснения"
+
+
+@pytest.mark.asyncio
+async def test_a_refused_request_is_not_retried():
+    """Отказ провайдера детерминирован: три одинаковых запроса — три отказа."""
+    import httpx
+
+    from bot.services.grok import GrokClient, Refused
+
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(400, json={"error": {"message": "model not found"}})
+
+    client = GrokClient("key", base_url="https://example.test/v1", retries=2)
+    client._client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="https://example.test/v1"
+    )
+
+    with pytest.raises(Refused) as refusal:
+        await client.complete("система", "вопрос")
+
+    assert attempts == 1
+    assert "model not found" in refusal.value.explanation
+    await client.close()
