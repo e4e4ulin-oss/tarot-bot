@@ -95,3 +95,9 @@ def test_deck_button_needs_an_address():
     markup = deck_button("https://taro.example.com")
     button = markup.inline_keyboard[0][0]
     assert button.web_app.url == "https://taro.example.com"
+
+
+def test_deck_is_published_without_extra_setup():
+    """Адрес колоды — свойство репозитория, а не настройка сервера."""
+    settings = Settings(BOT_TOKEN="x")
+    assert settings.miniapp_url.startswith("https://")

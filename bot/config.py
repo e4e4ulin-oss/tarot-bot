@@ -34,8 +34,12 @@ class Settings(BaseSettings):
     author_currency: str = Field(default="₽", alias="AUTHOR_CURRENCY")
 
     # --- Мини-приложение ---
-    # Адрес опубликованной колоды. Пусто — команда /deck отвечает, что её нет.
-    miniapp_url: str = Field(default="", alias="MINIAPP_URL")
+    # Адрес опубликованной колоды. По умолчанию — страница, которую собирает
+    # сам этот репозиторий: отдельной настройки на сервере она не требует.
+    # Пусто — команда /deck отвечает, что колоды нет.
+    miniapp_url: str = Field(
+        default="https://e4e4ulin-oss.github.io/tarot-bot/", alias="MINIAPP_URL"
+    )
 
     # --- Языковая модель ---
     # Любой OpenAI-совместимый провайдер: xAI, Groq, Google Gemini, OpenRouter, Cerebras.
