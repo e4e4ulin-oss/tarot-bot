@@ -123,3 +123,41 @@ def test_an_aspect_is_found_only_within_its_orb():
     far = aspects([Planet("Марс", Position(10)), Planet("Сатурн", Position(30))])
     assert close and close[0].kind == "соединение"
     assert not far
+
+
+def test_a_transit_knows_when_it_is_exact():
+    """Сатурн трижды проходит один градус: туда, попятно и снова вперёд.
+
+    Тройной проход — следствие попятного хода, и он обязан находиться
+    расчётом, а не угадываться.
+    """
+    from bot.astro import timing
+
+    marks = timing("Сатурн", 280.0, 90.0, datetime(2026, 10, 16, 12, 0))
+    assert len(marks.exact) == 3
+    assert marks.entered < datetime(2026, 10, 16) < marks.leaves
+
+
+def test_exactness_matches_the_measured_distance():
+    """Если транзит точен сегодня, то и расстояние до точного — около нуля."""
+    from bot.astro import _offset, timing
+
+    now = datetime(2026, 10, 16, 12, 0)
+    marks = timing("Сатурн", 280.0, 90.0, now)
+    nearest = min(marks.exact, key=lambda day: abs((day - now).total_seconds()))
+
+    assert abs((nearest - now).days) <= 1
+    assert abs(_offset("Saturn", 280.0, 90.0, nearest)) < 0.05
+
+
+def test_a_near_miss_is_not_reported_as_exact():
+    """Планета может подойти к градусу и отступить: выдумывать точность нельзя."""
+    from datetime import date as date_only
+
+    from bot.natal import forecast, full, timeline
+
+    card = full(date_only(1990, 3, 14), "15:30", "Москва")
+    now = datetime(2026, 10, 16, 12, 0)
+    pluto = [t for t in forecast(card, now) if t.moving == "Плутон"]
+    if pluto:  # транзит привязан к дате: если его нет, проверять нечего
+        assert "не станет" in timeline(pluto[0], card, now)

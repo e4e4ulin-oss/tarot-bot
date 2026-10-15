@@ -23,6 +23,7 @@ from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
 from . import astro
+from .utils import fmt_day
 from .geo import Place, find
 
 # Без времени считаем на полдень: середина суток ошибается не больше чем на
@@ -186,6 +187,35 @@ def points(card: Full) -> dict[str, astro.Position]:
     if card.midheaven is not None:
         out["Середина неба"] = card.midheaven
     return out
+
+
+def when(transit: astro.Transit, card: Full, moment: datetime | None = None) -> astro.Timing:
+    """Когда этот транзит был и будет точен и до каких пор он в силе."""
+    natal = points(card)[transit.natal]
+    angle = next(angle for kind, angle, _ in astro.ASPECTS if kind == transit.kind)
+    return astro.timing(transit.moving, natal.degrees, angle, moment or datetime.utcnow())
+
+
+def timeline(transit: astro.Transit, card: Full, moment: datetime | None = None) -> str:
+    """Срок транзита словами: когда точен и до каких пор в силе.
+
+    Планета может подойти к градусу и отступить, так и не став точной, —
+    тогда так и говорится. Выдавать прошлые точные даты за будущие нельзя:
+    человек прочтёт их как обещание.
+    """
+    moment = moment or datetime.utcnow()
+    marks = when(transit, card, moment)
+    ahead = [day for day in marks.exact if day.date() >= moment.date()]
+
+    if ahead:
+        dates = ", ".join(fmt_day(day, moment) for day in ahead[:3])
+        line = f"точный {dates}"
+    else:
+        line = "точным в этот заход не станет — подходит и отступает"
+
+    if marks.leaves is not None:
+        line += f"; в силе до {fmt_day(marks.leaves, moment)}"
+    return line
 
 
 def forecast(card: Full, moment: datetime | None = None) -> list[astro.Transit]:

@@ -37,3 +37,21 @@ def fmt_date(value: datetime | None) -> str:
     if value.tzinfo is None:
         value = value.replace(tzinfo=UTC)
     return value.strftime("%d.%m.%Y %H:%M")
+
+
+MONTHS = (
+    "января", "февраля", "марта", "апреля", "мая", "июня",
+    "июля", "августа", "сентября", "октября", "ноября", "декабря",
+)
+
+
+def fmt_day(value: datetime, today: datetime | None = None) -> str:
+    """День по-русски: «16 октября», с годом — если он не этот.
+
+    Для транзита важен день, а не час: планета стоит на градусе неделями.
+    """
+    today = today or datetime.now(UTC)
+    day = f"{value.day} {MONTHS[value.month - 1]}"
+    if value.date() == today.date():
+        return "сегодня"
+    return day if value.year == today.year else f"{day} {value.year}"
