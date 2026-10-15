@@ -83,14 +83,34 @@ def _park_tables_without_tenant_key(conn) -> list[str]:
     return parked
 
 
+# Чем заполнить обязательную колонку, которой в старой таблице не было.
+# Схема росла постепенно, и строка пятилетней давности может не знать о поле,
+# появившемся позже; без подстановки перелив упал бы на NOT NULL.
+FILLERS: dict[str, str] = {"DATETIME": "CURRENT_TIMESTAMP", "INTEGER": "0", "BOOLEAN": "0"}
+
+
 def _refill_rebuilt_tables(conn, parked: list[str]) -> None:
     """Переливает отставленные строки в новую таблицу, отдав их арендатору 1."""
+    inspector = inspect(conn)
     for table in parked:
         old = f"{table}_pre_tenant"
-        columns = [column["name"] for column in inspect(conn).get_columns(old)]
-        names = ", ".join(columns)
+        had = [column["name"] for column in inspector.get_columns(old)]
+        fresh = {column["name"]: column for column in inspector.get_columns(table)}
+
+        names = ["tenant_id", *had]
+        values = ["1", *had]
+        for name, column in fresh.items():
+            if name in names or column["nullable"]:
+                continue
+            kind = str(column["type"]).split("(")[0].upper()
+            names.append(name)
+            values.append(FILLERS.get(kind, "''"))
+
         conn.execute(
-            text(f"INSERT INTO {table} (tenant_id, {names}) SELECT 1, {names} FROM {old}")
+            text(
+                f"INSERT INTO {table} ({', '.join(names)}) "
+                f"SELECT {', '.join(values)} FROM {old}"
+            )
         )
         conn.execute(text(f"DROP TABLE {old}"))
         logger.info("Таблица %s пересобрана", table)
