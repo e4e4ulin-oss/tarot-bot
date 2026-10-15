@@ -168,3 +168,13 @@ def number_menu(spread_key: str) -> InlineKeyboardMarkup:
     builder.button(text="‹ К раскладкам", callback_data="menu:auto")
     builder.adjust(1)
     return builder.as_markup()
+
+
+def places_menu(places) -> InlineKeyboardMarkup:
+    """Тёзки: человек выбирает свой город сам, а не угадывает за него бот."""
+    builder = InlineKeyboardBuilder()
+    for place in places:
+        builder.button(text=f"{place.name} · {place.hint}", callback_data=f"place:{place.geonameid}")
+    builder.button(text="‹ Кабинет", callback_data="menu:profile")
+    builder.adjust(1)
+    return builder.as_markup()

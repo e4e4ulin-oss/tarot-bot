@@ -51,6 +51,7 @@ def test_description_skips_what_is_unknown():
         birth_time = None
         birth_city = "Томск"
         city = None
+        birth_lat = birth_lon = birth_tz = None
 
     lines = describe(U()).splitlines()
     assert "Дата рождения: 21.05.1998" in lines
@@ -65,6 +66,7 @@ def test_description_adds_the_cards_that_follow_from_the_date():
     class U:
         birth_date = date(1998, 5, 21)
         birth_time = birth_city = city = None
+        birth_lat = birth_lon = birth_tz = None
 
     lines = describe(U())
     assert "Карта рождения: Сила" in lines
@@ -75,5 +77,6 @@ def test_without_a_birth_date_there_are_no_cards():
     class U:
         birth_date = None
         birth_time = birth_city = city = None
+        birth_lat = birth_lon = birth_tz = None
 
     assert "Карта рождения" not in describe(U())

@@ -23,6 +23,15 @@ class Place:
     latitude: float
     longitude: float
     timezone: str
+    population: int = 0
+    country: str = ""
+    geonameid: int = 0
+
+    @property
+    def hint(self) -> str:
+        """Чем один тёзка отличается от другого в глазах человека."""
+        size = f"{self.population // 1000} тыс." if self.population >= 1000 else "посёлок"
+        return f"{size} · {self.timezone}"
 
 
 def _normalize(name: str) -> str:
@@ -30,10 +39,13 @@ def _normalize(name: str) -> str:
 
 
 @lru_cache(maxsize=1)
-def _index() -> dict[str, Place]:
-    """Имя во всех написаниях → город. Крупный город вытесняет тёзку-посёлок."""
-    index: dict[str, Place] = {}
-    population: dict[str, int] = {}
+def _index() -> dict[str, list[Place]]:
+    """Имя во всех написаниях → все тёзки, от крупного к мелкому.
+
+    Раньше крупный город просто вытеснял тёзку, и человек, родившийся в
+    Ростове Великом, получал небо Ростова-на-Дону. Теперь выбор за ним.
+    """
+    index: dict[str, list[Place]] = {}
 
     for city in geonamescache.GeonamesCache().get_cities().values():
         place = Place(
@@ -41,16 +53,17 @@ def _index() -> dict[str, Place]:
             latitude=float(city["latitude"]),
             longitude=float(city["longitude"]),
             timezone=city["timezone"],
+            population=int(city["population"]),
+            country=city["countrycode"],
+            geonameid=int(city["geonameid"]),
         )
-        names = [city["name"], *city.get("alternatenames", [])]
-        for name in names:
+        for name in [city["name"], *city.get("alternatenames", [])]:
             key = _normalize(name)
-            if not key:
-                continue
-            if population.get(key, -1) >= city["population"]:
-                continue
-            index[key] = place
-            population[key] = city["population"]
+            if key:
+                index.setdefault(key, []).append(place)
+
+    for places in index.values():
+        places.sort(key=lambda place: -place.population)
     return index
 
 
@@ -78,10 +91,27 @@ def _candidates(name: str) -> list[str]:
     return seen
 
 
-def find(name: str) -> Place | None:
+def find_all(name: str) -> list[Place]:
+    """Все города с таким именем — от крупного к мелкому."""
     index = _index()
     for guess in _candidates(name):
-        place = index.get(_normalize(guess))
-        if place is not None:
-            return place
-    return None
+        places = index.get(_normalize(guess))
+        if places:
+            return places
+    return []
+
+
+def find(name: str) -> Place | None:
+    """Самый крупный тёзка. Годится, когда выбирать не из чего или некогда."""
+    places = find_all(name)
+    return places[0] if places else None
+
+
+@lru_cache(maxsize=1)
+def _by_id() -> dict[int, Place]:
+    return {place.geonameid: place for places in _index().values() for place in places}
+
+
+def by_id(geonameid: int) -> Place | None:
+    """Место, выбранное человеком из нескольких тёзок."""
+    return _by_id().get(geonameid)

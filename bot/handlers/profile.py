@@ -14,8 +14,8 @@ from aiogram.types import CallbackQuery, Message
 from .. import profile as parse
 from .. import texts
 from ..db import Repo
-from ..geo import find
-from ..keyboards import profile_menu
+from ..geo import by_id, find_all
+from ..keyboards import places_menu, profile_menu
 from ..states import ProfileFlow
 
 router = Router(name="profile")
@@ -29,13 +29,13 @@ FIELDS = {
 }
 
 
-def confirmation(field: str, value: object) -> str:
-    """Город рождения подтверждается отдельно: по нему считается асцендент,
-    и человек должен сразу знать, понял его бот или нет."""
-    if field != "birth_city":
-        return texts.PROFILE_SAVED
-    place = find(str(value))
-    return texts.CITY_FOUND.format(city=place.name) if place else texts.CITY_UNKNOWN
+async def remember_place(repo: Repo, user_id: int, place) -> None:
+    await repo.save_profile(
+        user_id,
+        birth_lat=place.latitude,
+        birth_lon=place.longitude,
+        birth_tz=place.timezone,
+    )
 
 
 async def show(message: Message, repo: Repo, *, edit: bool = False) -> None:
@@ -101,5 +101,39 @@ async def on_answer(message: Message, state: FSMContext, repo: Repo) -> None:
 
     await repo.save_profile(message.chat.id, **{field: value})
     await state.clear()
-    await message.answer(confirmation(field, value))
+
+    if field != "birth_city":
+        await message.answer(texts.PROFILE_SAVED)
+        await show(message, repo)
+        return
+
+    # Город рождения отвечает за асцендент, поэтому его судьбу человек должен
+    # видеть сразу: нашёлся, не нашёлся или нашлось несколько тёзок
+    places = find_all(str(value))
+    if not places:
+        await repo.save_profile(message.chat.id, birth_lat=None, birth_lon=None, birth_tz=None)
+        await message.answer(texts.CITY_UNKNOWN)
+    elif len(places) == 1:
+        await remember_place(repo, message.chat.id, places[0])
+        await message.answer(texts.CITY_FOUND.format(city=places[0].name))
+    else:
+        await message.answer(texts.CITY_MANY, reply_markup=places_menu(places[:6]))
+        return
+
     await show(message, repo)
+
+
+@router.callback_query(F.data.startswith("place:"))
+async def cb_place(call: CallbackQuery, repo: Repo) -> None:
+    place = by_id(int(call.data.split(":", 1)[1]))
+    if place is None:
+        await call.answer()
+        return
+
+    await remember_place(repo, call.from_user.id, place)
+    if isinstance(call.message, Message):
+        await call.message.answer(
+            texts.CITY_CHOSEN.format(city=place.name, hint=place.hint)
+        )
+        await show(call.message, repo)
+    await call.answer()

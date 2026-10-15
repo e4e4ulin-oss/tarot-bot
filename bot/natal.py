@@ -75,8 +75,15 @@ def _moment(born: date, clock: str | None, place: Place | None) -> tuple[datetim
     ), exact
 
 
-def chart(born: date, clock: str | None = None, city: str | None = None) -> Chart:
-    place = find(city) if city else None
+def chart(
+    born: date,
+    clock: str | None = None,
+    city: str | None = None,
+    place: Place | None = None,
+) -> Chart:
+    # Место может быть уже выбрано человеком из нескольких тёзок —
+    # тогда искать по названию заново незачем
+    place = place or (find(city) if city else None)
     moment, exact = _moment(born, clock, place)
 
     sun = astro.sun(moment)
