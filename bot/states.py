@@ -7,6 +7,15 @@ from aiogram.fsm.state import State, StatesGroup
 
 class AutoFlow(StatesGroup):
     waiting_question = State()
+    # Число называет человек: расклад должен быть его, а не бота
+    waiting_number = State()
+
+
+class ProfileFlow(StatesGroup):
+    birth_date = State()
+    birth_time = State()
+    birth_city = State()
+    city = State()
 
 
 class AuthorFlow(StatesGroup):

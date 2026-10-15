@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import secrets
 
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
@@ -23,6 +24,7 @@ from ..config import Settings
 from ..db import Repo
 from ..keyboards import (
     after_reading_menu,
+    number_menu,
     paywall_menu,
     question_menu,
     spreads_menu,
@@ -30,11 +32,25 @@ from ..keyboards import (
 )
 from ..services.interpreter import DISCLAIMER, Interpreter
 from ..states import AutoFlow
-from ..tarot import SPREADS, DrawnCard, Spread, draw_spread, format_cards, get_spread, serialize
+from ..profile import describe
+from ..schedule import now
+from ..tarot import (
+    SPREADS,
+    DrawnCard,
+    Spread,
+    draw_spread,
+    format_cards,
+    get_spread,
+    rng_for,
+    serialize,
+)
 from ..tarot.images import cache_key, commons_url, local_path, reversed_image_bytes
 from ..utils import split_text
 
 logger = logging.getLogger(__name__)
+
+# Числа крупнее не нужны: это жест, а не счёт
+NUMBER_LIMIT = 99
 
 router = Router(name="auto")
 
@@ -81,12 +97,11 @@ async def cb_draw_without_question(
     if spread is None:
         await call.answer(texts.ERROR, show_alert=True)
         return
-    await state.clear()
+    await state.set_state(AutoFlow.waiting_number)
+    await state.update_data(spread_key=key, question=None)
     await call.answer()
     if isinstance(call.message, Message):
-        await run_reading(
-            call.message, call.from_user.id, spread, None, repo, settings, interpreter
-        )
+        await call.message.answer(texts.ASK_NUMBER, reply_markup=number_menu(key))
 
 
 @router.message(AutoFlow.waiting_question, F.text)
@@ -105,13 +120,69 @@ async def on_question(
         await message.answer(texts.QUESTION_TOO_LONG.format(limit=settings.max_question_length))
         return
 
-    await state.clear()
-    await run_reading(message, message.from_user.id, spread, question, repo, settings, interpreter)
+    await state.set_state(AutoFlow.waiting_number)
+    await state.update_data(spread_key=spread.key, question=question)
+    await message.answer(texts.ASK_NUMBER, reply_markup=number_menu(spread.key))
 
 
 @router.message(AutoFlow.waiting_question)
 async def on_non_text_question(message: Message) -> None:
     await message.answer(texts.QUESTION_REQUIRED)
+
+
+@router.message(AutoFlow.waiting_number, F.text)
+async def on_number(
+    message: Message,
+    state: FSMContext,
+    repo: Repo,
+    settings: Settings,
+    interpreter: Interpreter,
+) -> None:
+    raw = (message.text or "").strip()
+    if not raw.isdigit() or not 1 <= int(raw) <= NUMBER_LIMIT:
+        await message.answer(texts.BAD_NUMBER)
+        return
+
+    data = await state.get_data()
+    spread = get_spread(data.get("spread_key", "ptf"))
+    await state.clear()
+    await run_reading(
+        message,
+        message.from_user.id,
+        spread,
+        data.get("question"),
+        repo,
+        settings,
+        interpreter,
+        number=int(raw),
+    )
+
+
+@router.callback_query(AutoFlow.waiting_number, F.data.startswith("number:"))
+async def cb_number_from_the_deck(
+    call: CallbackQuery,
+    state: FSMContext,
+    repo: Repo,
+    settings: Settings,
+    interpreter: Interpreter,
+) -> None:
+    """Человек может не называть число — тогда его называет колода."""
+    data = await state.get_data()
+    spread = get_spread(data.get("spread_key", "ptf"))
+    question = data.get("question")
+    await state.clear()
+    await call.answer()
+    if isinstance(call.message, Message):
+        await run_reading(
+            call.message,
+            call.from_user.id,
+            spread,
+            question,
+            repo,
+            settings,
+            interpreter,
+            number=secrets.randbelow(NUMBER_LIMIT) + 1,
+        )
 
 
 async def send_card_images(
@@ -176,6 +247,8 @@ async def run_reading(
     repo: Repo,
     settings: Settings,
     interpreter: Interpreter,
+    *,
+    number: int,
 ) -> None:
     """Общий сценарий: доступ → лимит → карты → разбор → сохранение."""
     access = await check_access(repo, settings, user_id)
@@ -207,11 +280,15 @@ async def run_reading(
             )
             return
 
+    # Карты ложатся под названное число, а не под случайность сервера:
+    # тот же человек с тем же числом в ту же минуту получит тот же расклад
     drawn = draw_spread(
         spread,
         allow_reversed=settings.allow_reversed,
         reversed_chance=settings.reversed_chance,
+        rng=rng_for(user_id, number, now(settings), question),
     )
+    about = describe(await repo.get_user(user_id))
 
     await send_card_images(message.bot, message.chat.id, drawn, repo, settings)
     cards_message = await message.answer(format_cards(spread, drawn, question))
@@ -219,7 +296,7 @@ async def run_reading(
 
     # «печатает…» в чате, пока модель думает — иначе кажется, что бот завис
     async with ChatActionSender.typing(bot=message.bot, chat_id=message.chat.id):
-        result = await interpreter.interpret(spread, drawn, question)
+        result = await interpreter.interpret(spread, drawn, question, about=about)
 
     try:
         await status.delete()

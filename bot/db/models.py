@@ -66,6 +66,15 @@ class User(Base):
         Boolean, default=False, server_default="0", index=True
     )
 
+    # Личный кабинет. Всё необязательно: человек заполняет, сколько захочет,
+    # а разбор становится подробнее ровно настолько, насколько тот открылся.
+    birth_date: Mapped[date | None] = mapped_column(Date)
+    # Время хранится строкой «ЧЧ:ММ»: часового пояса рождения мы не знаем,
+    # а приводить к UTC без него значит врать точностью
+    birth_time: Mapped[str | None] = mapped_column(String(5))
+    birth_city: Mapped[str | None] = mapped_column(String(64))
+    city: Mapped[str | None] = mapped_column(String(64))
+
     @property
     def display(self) -> str:
         name = self.first_name or "без имени"

@@ -54,7 +54,11 @@ class Interpretation:
 
 
 def build_prompt(
-    spread: Spread, drawn: list[DrawnCard], question: str | None, author_name: str = ""
+    spread: Spread,
+    drawn: list[DrawnCard],
+    question: str | None,
+    author_name: str = "",
+    about: str = "",
 ) -> str:
     parts = [f"Расклад: «{spread.title}» ({spread.subtitle})."]
     parts.append(
@@ -62,6 +66,10 @@ def build_prompt(
         if question
         else "Человек не задал конкретного вопроса — сделайте разбор общей ситуации."
     )
+    if about:
+        # То, что человек рассказал о себе сам. Домысливать по этим данным
+        # ничего не надо — они нужны, чтобы разбор был про него
+        parts.append(f"\nЧто человек рассказал о себе:\n{about}")
     parts.append("\nВыпавшие карты (позиция, карта, положение, ключевые слова, базовое значение):")
     parts.append(cards_plain(drawn))
     if spread.yes_no and drawn:
@@ -106,13 +114,19 @@ class Interpreter:
         self.deadline = deadline
 
     async def interpret(
-        self, spread: Spread, drawn: list[DrawnCard], question: str | None
+        self,
+        spread: Spread,
+        drawn: list[DrawnCard],
+        question: str | None,
+        *,
+        about: str = "",
     ) -> Interpretation:
         if self.grok.enabled:
             try:
                 raw = await asyncio.wait_for(
                     self.grok.complete(
-                        SYSTEM_PROMPT, build_prompt(spread, drawn, question, self.author_name)
+                        SYSTEM_PROMPT,
+                        build_prompt(spread, drawn, question, self.author_name, about),
                     ),
                     timeout=self.deadline,
                 )
