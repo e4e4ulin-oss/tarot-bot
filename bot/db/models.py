@@ -33,6 +33,8 @@ class Base(DeclarativeBase):
 class ReadingMode(str, enum.Enum):
     AUTO = "auto"
     AUTHOR = "author"
+    # Разбор натальной карты: не расклад, и в счёт бесплатных не идёт
+    NATAL = "natal"
 
 
 class OrderStatus(str, enum.Enum):
@@ -212,6 +214,9 @@ class Payment(Base):
     user_id: Mapped[int] = mapped_column(BigInteger, index=True)
     amount: Mapped[int] = mapped_column(Integer)
     currency: Mapped[str] = mapped_column(String(8), default="RUB")
+    # За что заплачено: расклад и разбор карты — разные товары, и оплата
+    # одного не должна открывать другое
+    kind: Mapped[str] = mapped_column(String(32), default="auto_reading", index=True)
     charge_id: Mapped[str | None] = mapped_column(String(128), unique=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, index=True
@@ -252,6 +257,7 @@ class Tenant(Base):
     free_auto_readings: Mapped[int] = mapped_column(Integer, default=3)
     free_needs_daily: Mapped[bool] = mapped_column(Boolean, default=True)
     auto_reading_price: Mapped[int] = mapped_column(Integer, default=369)
+    natal_reading_price: Mapped[int] = mapped_column(Integer, default=990)
     # Деньги идут на счёт арендатора, поэтому и токен провайдера его
     payment_provider_token: Mapped[str] = mapped_column(String(128), default="")
 

@@ -36,6 +36,7 @@ ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("events", "tenant_id", "INTEGER DEFAULT 1 NOT NULL"),
     ("daily_cards", "tenant_id", "INTEGER DEFAULT 1 NOT NULL"),
     ("payments", "tenant_id", "INTEGER DEFAULT 1 NOT NULL"),
+    ("payments", "kind", "VARCHAR(32) DEFAULT 'auto_reading' NOT NULL"),
 )
 
 # Таблицы, где арендатор входит в первичный ключ. Такой ключ в SQLite не

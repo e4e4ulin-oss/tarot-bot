@@ -35,6 +35,7 @@ COMMANDS = [
     BotCommand(command="profile", description="Личный кабинет"),
     BotCommand(command="chart", description="Натальная карта"),
     BotCommand(command="forecast", description="Астрологический прогноз"),
+    BotCommand(command="natal", description="Подробный разбор карты"),
     BotCommand(command="help", description="Как пользоваться"),
     BotCommand(command="cancel", description="Отменить текущее действие"),
 ]

@@ -2,7 +2,18 @@
 
 from aiogram import Router
 
-from . import admin, author, auto, chart, common, daily, miniapp, payments, profile
+from . import (
+    admin,
+    author,
+    auto,
+    chart,
+    common,
+    daily,
+    miniapp,
+    natal,
+    payments,
+    profile,
+)
 
 # Роутеры объявлены на уровне модулей, поэтому собрать корневой роутер можно один раз за процесс.
 ROUTERS: tuple[Router, ...] = (
@@ -15,6 +26,7 @@ ROUTERS: tuple[Router, ...] = (
     payments.router,
     profile.router,
     chart.router,
+    natal.router,
     common.fallback_router,
 )
 
