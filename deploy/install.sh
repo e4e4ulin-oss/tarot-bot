@@ -242,6 +242,10 @@ RULES
 Description=Tarot Telegram bot
 After=network-online.target
 Wants=network-online.target
+# Падающий бот не должен запереть себя насовсем: systemd по умолчанию
+# сдаётся после пяти попыток за десять секунд и дальше ждёт человека.
+# Ключ действует только здесь, в [Unit]: в [Service] systemd его игнорирует.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -252,11 +256,6 @@ EnvironmentFile=$ENV_FILE
 ExecStart=$PROJECT_DIR/.venv/bin/python -m bot
 Restart=always
 RestartSec=5
-# Падающий бот не должен запереть себя насовсем: systemd по умолчанию
-# сдаётся после пяти попыток за десять секунд и дальше ждёт человека.
-# Здесь предел снят, перезапуск и так раз в пять секунд, а чинится всё
-# следующим коммитом — автообновление работает отдельным таймером.
-StartLimitIntervalSec=0
 
 [Install]
 WantedBy=multi-user.target

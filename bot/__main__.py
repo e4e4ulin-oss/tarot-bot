@@ -1,149 +1,69 @@
-"""Точка входа: python -m bot"""
+"""Запуск бота: `python -m bot`.
+
+Здесь намеренно пусто. Настоящий запуск живёт в bot/run.py, а этот файл —
+только сторож: он ловит всё, что падает при импорте и на старте, и успевает
+рассказать об этом в Telegram, прежде чем процесс умрёт.
+
+Нужно это потому, что упавший на старте бот — единственный случай, когда
+никто не может ни спросить у него логи, ни получить ответ: команды работают
+только у живого процесса. Один вечер ушёл ровно на это: сервер перезапускал
+бота девяносто два раза, а причину пришлось доставать руками с машины.
+"""
 
 from __future__ import annotations
 
-import asyncio
-import logging
-from contextlib import suppress
+import json
+import os
+import sys
+import traceback
+import urllib.request
 
-from aiogram import Bot, Dispatcher
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
-from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import BotCommand
-from pydantic import ValidationError
-
-from .config import Settings, describe_missing_settings, get_settings
-from .db import create_engine, create_session_factory, init_models
-from .handlers import build_router
-from .middlewares import (
-    DbSessionMiddleware,
-    TenantMiddleware,
-    ThrottlingMiddleware,
-    UserMiddleware,
-)
-from .services import GrokClient, Interpreter, ServerOps
-from .services.daily import DailyCards
-from .tenants import active_tenants, ensure_default, settings_for
-
-logger = logging.getLogger(__name__)
-
-COMMANDS = [
-    BotCommand(command="start", description="Меню"),
-    BotCommand(command="daily", description="Карта дня"),
-    BotCommand(command="deck", description="Колода целиком"),
-    BotCommand(command="help", description="Как пользоваться"),
-    BotCommand(command="cancel", description="Отменить текущее действие"),
-]
+TELEGRAM = "https://api.telegram.org/bot{token}/sendMessage"
+LIMIT = 3000  # в сообщение Telegram влезает 4096 знаков, оставляем запас
 
 
-def build_dispatcher(
-    settings: Settings,
-    interpreter: Interpreter,
-    session_factory,
-    *,
-    throttle_rate: float = 0.7,
-    server: ServerOps | None = None,
-) -> Dispatcher:
-    dp = Dispatcher(storage=MemoryStorage())
-    dp["settings"] = settings
-    dp["interpreter"] = interpreter
-    dp["server"] = server or ServerOps(settings.service_name, settings.update_script)
+def tell_the_owner(error: BaseException) -> None:
+    """Пробует донести причину падения до админ-чата.
 
-    dp.update.middleware(DbSessionMiddleware(session_factory))
-    # Порядок важен: арендатор ищется по уже открытой сессии
-    dp.update.middleware(TenantMiddleware(settings))
-    dp.update.middleware(UserMiddleware())
-    if throttle_rate > 0:
-        dp.message.middleware(ThrottlingMiddleware(throttle_rate))
-        dp.callback_query.middleware(ThrottlingMiddleware(throttle_rate))
+    Берёт токен и чат прямо из окружения: к этому моменту ни настройки, ни
+    база могут быть недоступны. Любая ошибка здесь проглатывается — сторож
+    не имеет права мешать настоящей ошибке попасть в журнал.
+    """
+    token = os.environ.get("BOT_TOKEN", "")
+    chat = os.environ.get("ADMIN_CHAT_ID", "")
+    if not token or not chat:
+        return
 
-    dp.include_router(build_router())
-    return dp
+    tail = "".join(traceback.format_exception(error))[-LIMIT:]
+    body = json.dumps(
+        {
+            "chat_id": chat,
+            "text": f"Бот не поднялся:\n\n<pre>{tail}</pre>",
+            "parse_mode": "HTML",
+        }
+    ).encode()
 
-
-async def main() -> None:
     try:
-        settings = get_settings()
-    except ValidationError as exc:
-        raise SystemExit(describe_missing_settings(exc)) from None
-
-    logging.basicConfig(
-        level=getattr(logging, settings.log_level.upper(), logging.INFO),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
-
-    if not settings.ai_enabled:
-        logger.warning(
-            "XAI_API_KEY не задан — авто-разбор будет отдавать базовые значения карт без ИИ"
+        request = urllib.request.Request(
+            TELEGRAM.format(token=token),
+            data=body,
+            headers={"Content-Type": "application/json"},
         )
-    if not settings.admin_chat_id:
-        logger.warning("ADMIN_CHAT_ID не задан — заявки на авторский разбор некуда отправлять")
+        urllib.request.urlopen(request, timeout=10).close()
+    except Exception:  # noqa: BLE001 - сторож молчит о собственных бедах
+        pass
 
-    engine = create_engine(settings.database_url)
-    await init_models(engine)
-    session_factory = create_session_factory(engine)
 
-    grok = GrokClient(
-        settings.ai_api_key,
-        base_url=settings.ai_base_url,
-        model=settings.ai_model,
-        timeout=settings.grok_timeout,
-        max_tokens=settings.grok_max_tokens,
-        temperature=settings.grok_temperature,
-        retries=settings.grok_retries,
-    )
-    interpreter = Interpreter(
-        grok, author_name=settings.author_name, deadline=settings.grok_deadline
-    )
-
-    async with session_factory() as session:
-        await ensure_default(session, settings)
-        tenants = await active_tenants(session)
-
-    if not tenants:
-        raise SystemExit(
-            "Нет ни одного арендатора: заведите бота в таблице tenants "
-            "или задайте BOT_TOKEN, и он станет арендатором по умолчанию."
-        )
-
-    bots = [
-        Bot(tenant.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-        for tenant in tenants
-    ]
-    dp = build_dispatcher(settings, interpreter, session_factory)
-
-    tasks: list[asyncio.Task] = []
+def launch() -> int:
     try:
-        for bot, tenant in zip(bots, tenants, strict=True):
-            await bot.set_my_commands(COMMANDS)
-            await bot.delete_webhook(drop_pending_updates=True)
-            if settings.daily_card_enabled:
-                # У каждого арендатора своя рассылка: свой бот и свои подписчики
-                brand = settings_for(tenant, settings)
-                tasks.append(
-                    asyncio.create_task(
-                        DailyCards(bot, brand, session_factory, tenant_id=tenant.id).run()
-                    )
-                )
-            logger.info("Бот «%s» запущен", tenant.title)
+        from .run import run
 
-        if settings.daily_card_enabled:
-            logger.info("Карта дня: рассылка в %s:00", settings.daily_card_hour)
-        await dp.start_polling(*bots)
-    finally:
-        for task in tasks:
-            task.cancel()
-            with suppress(asyncio.CancelledError):
-                await task
-        await grok.close()
-        for bot in bots:
-            await bot.session.close()
-        await engine.dispose()
+        return run()
+    except BaseException as error:  # noqa: BLE001 - сообщаем и отдаём дальше
+        if not isinstance(error, (KeyboardInterrupt, SystemExit)):
+            tell_the_owner(error)
+        raise
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        logger.info("Бот остановлен")
+    sys.exit(launch())

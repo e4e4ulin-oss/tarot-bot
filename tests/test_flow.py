@@ -18,7 +18,7 @@ from aiogram.methods import TelegramMethod
 from aiogram.types import CallbackQuery, Chat, MessageId, PhotoSize, Update, User
 from aiogram.types import Message as TgMessage
 
-from bot.__main__ import build_dispatcher
+from bot.run import build_dispatcher
 from bot.tenants import ensure_default
 from bot.config import Settings
 from bot.db import OrderStatus, Repo, create_engine, create_session_factory, init_models
