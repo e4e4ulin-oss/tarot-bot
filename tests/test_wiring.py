@@ -102,3 +102,58 @@ def test_deck_is_published_without_extra_setup():
     """Адрес колоды — свойство репозитория, а не настройка сервера."""
     settings = Settings(BOT_TOKEN="x")
     assert settings.miniapp_url.startswith("https://")
+
+
+def undefined_names(module) -> set[str]:
+    """Имена, которые код читает как глобальные, но которых в модуле нет.
+
+    Ровно та ошибка, на которой бот ушёл в перезапуск: вызов добавили,
+    импорт — нет. Такое не ловится ни одним сценарным тестом, если функция
+    в тестах не выполняется: main() как раз из них.
+    """
+    import builtins
+    import dis
+
+    seen: set[str] = set()
+
+    def walk(code) -> None:
+        for instruction in dis.get_instructions(code):
+            if instruction.opname == "LOAD_GLOBAL":
+                seen.add(instruction.argval)
+        for const in code.co_consts:
+            if hasattr(const, "co_code"):
+                walk(const)
+
+    # Сравниваем по файлу, а не по имени модуля: dataclass, Enum и SQLAlchemy
+    # дописывают в наши классы методы, собранные в их собственных исходниках
+    def ours(code) -> bool:
+        return code is not None and code.co_filename == module.__file__
+
+    for value in vars(module).values():
+        code = getattr(value, "__code__", None)
+        if ours(code):
+            walk(code)
+        elif isinstance(value, type):
+            for member in vars(value).values():
+                member_code = getattr(member, "__code__", None)
+                if ours(member_code):
+                    walk(member_code)
+
+    known = set(vars(module)) | set(dir(builtins))
+    return {name for name in seen if name not in known}
+
+
+def test_every_module_has_what_it_calls():
+    import importlib
+    import pkgutil
+
+    import bot
+
+    broken: dict[str, set[str]] = {}
+    for info in pkgutil.walk_packages(bot.__path__, prefix="bot."):
+        module = importlib.import_module(info.name)
+        missing = undefined_names(module)
+        if missing:
+            broken[info.name] = missing
+
+    assert not broken, f"вызывают то, чего не импортировали: {broken}"
