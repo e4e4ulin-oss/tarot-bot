@@ -156,8 +156,10 @@ def profile_menu() -> InlineKeyboardMarkup:
     builder.button(text="Время рождения", callback_data="profile:birth_time")
     builder.button(text="Город рождения", callback_data="profile:birth_city")
     builder.button(text="Где живу сейчас", callback_data="profile:city")
+    builder.button(text="🪐 Натальная карта", callback_data="chart:show")
+    builder.button(text="🔭 Прогноз", callback_data="chart:forecast")
     builder.button(text="‹ Меню", callback_data="menu:main")
-    builder.adjust(2, 2, 1)
+    builder.adjust(2, 2, 2, 1)
     return builder.as_markup()
 
 

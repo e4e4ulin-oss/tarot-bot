@@ -58,3 +58,68 @@ def test_degrees_inside_a_sign_are_cut_not_rounded():
 
     assert str(Position(59.7)) == "Телец 29°"
     assert str(Position(60.0)) == "Близнецы 0°"
+
+
+def test_the_great_conjunction_of_2020_is_in_place():
+    """21 декабря 2020 Юпитер и Сатурн сошлись в начале Водолея.
+
+    Событие известное и проверяемое по любому источнику: если расчёт врёт,
+    он соврёт и здесь.
+    """
+    from bot.astro import planets
+
+    bodies = {planet.name: planet for planet in planets(datetime(2020, 12, 21, 18, 20))}
+    jupiter = bodies["Юпитер"].position
+    saturn = bodies["Сатурн"].position
+
+    assert abs(jupiter.degrees - saturn.degrees) < 0.5
+    assert jupiter.sign == "Водолей" and saturn.sign == "Водолей"
+    assert jupiter.degrees_in_sign < 1
+
+
+def test_mercury_never_runs_far_from_the_sun():
+    """Меркурий не отходит от Солнца больше чем на 28° — это астрономия."""
+    from bot.astro import planets
+
+    for day in (1, 90, 180, 270):
+        bodies = {p.name: p.position.degrees for p in planets(datetime(2026, 1, 1) + timedelta(days=day))}
+        gap = abs(bodies["Солнце"] - bodies["Меркурий"]) % 360
+        assert min(gap, 360 - gap) <= 28.5
+
+
+def test_venus_stays_within_its_elongation_too():
+    from bot.astro import planets
+
+    for day in (0, 120, 240):
+        bodies = {p.name: p.position.degrees for p in planets(datetime(2026, 1, 1) + timedelta(days=day))}
+        gap = abs(bodies["Солнце"] - bodies["Венера"]) % 360
+        assert min(gap, 360 - gap) <= 48.5
+
+
+def test_outer_planets_are_retrograde_about_five_months_a_year():
+    """Уран идёт попятно примерно 150 дней в году: это следствие орбит."""
+    from bot.astro import planets
+
+    days = [
+        any(p.name == "Уран" and p.retrograde for p in planets(datetime(2026, 1, 1) + timedelta(days=n * 10)))
+        for n in range(36)
+    ]
+    assert 10 <= sum(days) <= 20
+
+
+def test_houses_start_at_the_ascendant():
+    from bot.astro import Position, house_of
+
+    asc = Position(100.0)
+    assert house_of(Position(100.0), asc) == 1
+    assert house_of(Position(131.0), asc) == 2
+    assert house_of(Position(99.0), asc) == 12
+
+
+def test_an_aspect_is_found_only_within_its_orb():
+    from bot.astro import Planet, Position, aspects
+
+    close = aspects([Planet("Марс", Position(10)), Planet("Сатурн", Position(14))])
+    far = aspects([Planet("Марс", Position(10)), Planet("Сатурн", Position(30))])
+    assert close and close[0].kind == "соединение"
+    assert not far

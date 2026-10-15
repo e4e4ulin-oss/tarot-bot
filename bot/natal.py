@@ -98,3 +98,100 @@ def chart(
 
     rising = astro.ascendant(moment, place.latitude, place.longitude)
     return Chart(sun=sun, moon=moon, ascendant=rising, place=place, exact_time=True)
+
+
+@dataclass(frozen=True)
+class Full:
+    """Карта целиком: планеты, углы, дома и аспекты.
+
+    Дома и углы появляются только когда известны и время, и место: без них
+    это не карта, а список планет на день рождения.
+    """
+
+    planets: list[astro.Planet]
+    aspects: list[astro.Aspect]
+    ascendant: astro.Position | None = None
+    midheaven: astro.Position | None = None
+    place: Place | None = None
+    exact_time: bool = False
+
+    @property
+    def has_houses(self) -> bool:
+        return self.ascendant is not None
+
+    def house_of(self, planet: astro.Planet) -> int | None:
+        if self.ascendant is None:
+            return None
+        return astro.house_of(planet.position, self.ascendant)
+
+    def lines(self, aspects_limit: int = 8) -> list[str]:
+        out: list[str] = []
+        if self.ascendant is not None and self.midheaven is not None:
+            out.append(f"Асцендент: {self.ascendant}   Середина неба: {self.midheaven}")
+            out.append("")
+
+        for planet in self.planets:
+            house = self.house_of(planet)
+            tail = f"   {house} дом" if house else ""
+            mark = " R" if planet.retrograde else ""
+            out.append(f"{planet.name}: {planet.position}{mark}{tail}")
+
+        if self.aspects:
+            out.append("")
+            out.append("Аспекты:")
+            out.extend(f"{aspect}" for aspect in self.aspects[:aspects_limit])
+
+        if not self.exact_time:
+            out.append("")
+            out.append(
+                "Без времени рождения нет ни домов, ни асцендента, а Луна "
+                "посчитана на полдень — за сутки она уходит на ползнака."
+            )
+        elif self.place is None:
+            out.append("")
+            out.append("Без города рождения нет домов и асцендента.")
+        return out
+
+
+def full(
+    born: date,
+    clock: str | None = None,
+    city: str | None = None,
+    place: Place | None = None,
+) -> Full:
+    place = place or (find(city) if city else None)
+    moment, exact = _moment(born, clock, place)
+
+    bodies = astro.planets(moment)
+    links = astro.aspects(bodies)
+
+    if not exact or place is None:
+        return Full(planets=bodies, aspects=links, place=place, exact_time=exact)
+
+    return Full(
+        planets=bodies,
+        aspects=links,
+        ascendant=astro.ascendant(moment, place.latitude, place.longitude),
+        midheaven=astro.midheaven(moment, place.longitude),
+        place=place,
+        exact_time=True,
+    )
+
+
+def points(card: Full) -> dict[str, astro.Position]:
+    """Точки карты, к которым имеет смысл прикладывать транзиты."""
+    out = {planet.name: planet.position for planet in card.planets}
+    if card.ascendant is not None:
+        out["Асцендент"] = card.ascendant
+    if card.midheaven is not None:
+        out["Середина неба"] = card.midheaven
+    return out
+
+
+def forecast(card: Full, moment: datetime | None = None) -> list[astro.Transit]:
+    """Что сейчас стоит на градусах карты.
+
+    Пустой список — нормальный ответ: месяцами может не быть ни одного
+    близкого транзита, и придумывать их незачем.
+    """
+    return astro.transits(points(card), moment or datetime.utcnow())
