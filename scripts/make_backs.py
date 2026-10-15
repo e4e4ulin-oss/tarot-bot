@@ -5,6 +5,10 @@
 перекрашивается основа, а золото остаётся золотом.
 
     python scripts/make_backs.py ПАПКА_СО_СЛОЯМИ ПАПКА_РЕЗУЛЬТАТА
+    python scripts/make_backs.py СЛОИ РЕЗУЛЬТАТ --face КАРТА.png --only fool
+
+Второй вызов нужен, когда фон группы не плоский: поле рубашки берётся с самой
+карты, а не красится в один цвет.
 
 Слои ожидаются такими, какими их отдаёт генератор: 01_frame_rosettes.png,
 02_rays_stars.png, 03_cartouche.png, 04_red_canvas.png.
@@ -15,11 +19,11 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 # Те же тона, что у лицевых сторон: docs/design/cards.md
 TONES: dict[str, tuple[int, int, int]] = {
-    "fool": (0xC9, 0xB6, 0x9A),
+    "fool": (0xB9, 0x8D, 0x5B),
     "major1": (0x8F, 0x03, 0x03),
     "major2": (0x10, 0x1A, 0x33),
     "major3": (0x15, 0x12, 0x0F),
@@ -40,6 +44,10 @@ CARTOUCHE_DARKEN = 0.86
 # Орнамент перекрашивается в чистое золото. Иначе на светлом и холодном фоне
 # вылезает красная подложка, оставшаяся в полупрозрачных краях слоёв.
 GOLD = (0xD9, 0xAC, 0x5E)
+
+# На светлом фоне золото не видно: его контраст с бронзой — 1.2 : 1. Там орнамент
+# идёт тёмно-коричневым, тем же, которым на этой карте пишется подпись.
+DARK = (0x4A, 0x2E, 0x18)
 
 
 def ornament_strength(g: int) -> float:
@@ -67,8 +75,8 @@ def tinted_canvas(canvas: Image.Image, tone: tuple[int, int, int]) -> Image.Imag
     return out
 
 
-def golden(layer: Image.Image) -> Image.Image:
-    """Орнамент в чистом золоте, подложка выброшена."""
+def golden(layer: Image.Image, colour: tuple[int, int, int] = GOLD) -> Image.Image:
+    """Орнамент в одном цвете, подложка выброшена."""
     source = layer.convert("RGBA")
     grey = source.convert("L")
     values = [v for v, (_, _, _, a) in zip(grey.getdata(), source.getdata(), strict=True) if a > 0]
@@ -81,17 +89,22 @@ def golden(layer: Image.Image) -> Image.Image:
             pixels.append((0, 0, 0, 0))
             continue
         shade = min(1.15, 0.75 + 0.5 * (value / mean))
-        pixels.append((*(min(255, round(c * shade)) for c in GOLD), round(a * strength)))
+        pixels.append((*(min(255, round(c * shade)) for c in colour), round(a * strength)))
 
     out = Image.new("RGBA", source.size)
     out.putdata(pixels)
     return out
 
 
-def tinted_cartouche(cartouche: Image.Image, tone: tuple[int, int, int]) -> Image.Image:
-    """Заливка картуша в цвете группы, контур — золотой."""
+def tinted_cartouche(
+    cartouche: Image.Image,
+    tone: tuple[int, int, int],
+    colour: tuple[int, int, int] = GOLD,
+    lift: float = CARTOUCHE_DARKEN,
+) -> Image.Image:
+    """Заливка картуша в цвете группы, контур — цветом орнамента."""
     source = cartouche.convert("RGBA")
-    fill = tuple(round(c * CARTOUCHE_DARKEN) for c in tone)
+    fill = tuple(min(255, round(c * lift)) for c in tone)
 
     pixels = []
     for _r, g, _b, a in source.getdata():
@@ -100,7 +113,7 @@ def tinted_cartouche(cartouche: Image.Image, tone: tuple[int, int, int]) -> Imag
             continue
         strength = ornament_strength(g)
         colour = tuple(
-            round(fill[i] * (1 - strength) + GOLD[i] * strength) for i in range(3)
+            round(fill[i] * (1 - strength) + colour[i] * strength) for i in range(3)
         )
         pixels.append((*colour, a))
 
@@ -109,21 +122,51 @@ def tinted_cartouche(cartouche: Image.Image, tone: tuple[int, int, int]) -> Imag
     return out
 
 
-def build(layers: Path, tone: tuple[int, int, int]) -> Image.Image:
+def field_from_face(face: Image.Image, size: tuple[int, int]) -> Image.Image:
+    """Поле рубашки из фона самой карты.
+
+    Берётся верхняя полоса — там только фон, без фигуры, — и раскладывается
+    зеркально по обеим осям. Зеркала здесь не украшение: рубашка обязана
+    совпадать сама с собой при повороте на 180°, иначе перевёрнутая карта
+    выдаёт себя рисунком фона.
+    """
+    width, height = face.size
+    band = face.crop((0, 0, width, int(height * 0.13)))
+    half = band.resize((size[0], size[1] // 2), Image.LANCZOS)
+    half = Image.blend(half, ImageOps.mirror(half), 0.5)
+    out = Image.new("RGB", size)
+    out.paste(half, (0, 0))
+    out.paste(ImageOps.flip(half), (0, size[1] - half.height))
+    return out
+
+
+def build(layers: Path, tone: tuple[int, int, int], face: Path | None = None) -> Image.Image:
     canvas = Image.open(layers / LAYER_CANVAS).convert("RGB")
-    back = tinted_canvas(canvas, tone).convert("RGBA")
-    back.alpha_composite(golden(Image.open(layers / LAYER_RAYS)))
-    back.alpha_composite(tinted_cartouche(Image.open(layers / LAYER_CARTOUCHE), tone))
-    back.alpha_composite(golden(Image.open(layers / LAYER_FRAME)))
+    if face is None:
+        ground = tinted_canvas(canvas, tone)
+    else:
+        ground = field_from_face(Image.open(face).convert("RGB"), canvas.size)
+    light = sum(tone) / 3 > 128
+    colour = DARK if light else GOLD
+    lift = 1.12 if light else CARTOUCHE_DARKEN
+
+    back = ground.convert("RGBA")
+    back.alpha_composite(golden(Image.open(layers / LAYER_RAYS), colour))
+    back.alpha_composite(
+        tinted_cartouche(Image.open(layers / LAYER_CARTOUCHE), tone, colour, lift)
+    )
+    back.alpha_composite(golden(Image.open(layers / LAYER_FRAME), colour))
     return back.convert("RGB")
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 3:
+    if len(argv) < 3:
         print(__doc__)
         return 2
 
     layers, out_dir = Path(argv[1]), Path(argv[2])
+    face = Path(argv[argv.index("--face") + 1]) if "--face" in argv else None
+    only = argv[argv.index("--only") + 1] if "--only" in argv else None
     missing = [n for n in (LAYER_FRAME, LAYER_RAYS, LAYER_CARTOUCHE, LAYER_CANVAS)
                if not (layers / n).exists()]
     if missing:
@@ -132,7 +175,9 @@ def main(argv: list[str]) -> int:
 
     out_dir.mkdir(parents=True, exist_ok=True)
     for key, tone in TONES.items():
-        back = build(layers, tone)
+        if only and key != only:
+            continue
+        back = build(layers, tone, face if key == only else None)
         target = out_dir / f"back-{key}.jpg"
         back.resize((720, 1080), Image.LANCZOS).save(target, quality=86, optimize=True)
         print(f"{target.name}: фон #{tone[0]:02X}{tone[1]:02X}{tone[2]:02X}")

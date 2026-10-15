@@ -116,8 +116,14 @@ def inspect(path: Path, tone_hex: str) -> Check:
             break
 
     lower = image.crop((0, int(height * 0.35), width, height)).resize((80, 80))
-    bright = sorted(sum(p) / 3 for p in lower.getdata())
-    relief = bright[int(len(bright) * 0.9)] - sum(corner[:3]) / 3
+    tones = sorted(sum(p) / 3 for p in lower.getdata())
+    ground = sum(corner[:3]) / 3
+    # На светлом фоне фигура тёмная, и запас считается в другую сторону
+    relief = (
+        ground - tones[int(len(tones) * 0.1)]
+        if ground > 128
+        else tones[int(len(tones) * 0.9)] - ground
+    )
 
     problems = []
     if delta > MAX_BACKGROUND_DELTA:
