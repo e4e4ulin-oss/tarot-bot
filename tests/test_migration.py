@@ -143,3 +143,36 @@ async def test_rebuilt_tables_keep_their_rows(tmp_path: Path):
     assert not [name for (name,) in rows if name.endswith("_pre_tenant")]
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_interrupted_rebuild_is_finished_on_the_next_start(tmp_path: Path):
+    """Пересборка могла оборваться после переименования таблицы.
+
+    Тогда данные лежат в отставленной таблице, а новая — пустая. Следующий
+    запуск обязан это заметить и долить, а не оставить клиентов в стороне.
+    """
+    engine = create_engine(f"sqlite+aiosqlite:///{tmp_path / 'broken.db'}")
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "CREATE TABLE users_pre_tenant (id INTEGER PRIMARY KEY, username VARCHAR(64), "
+                "first_name VARCHAR(128), created_at DATETIME, "
+                "daily_subscribed BOOLEAN DEFAULT 0 NOT NULL)"
+            )
+        )
+        await conn.execute(
+            text(
+                "INSERT INTO users_pre_tenant (id, first_name, created_at, daily_subscribed) "
+                "VALUES (7, 'Потеряшка', '2026-01-01 00:00:00', 1)"
+            )
+        )
+
+    await init_models(engine)
+
+    factory = create_session_factory(engine)
+    async with factory() as session:
+        user = await Repo(session, 1).get_user(7)
+    assert user is not None and user.first_name == "Потеряшка"
+
+    await engine.dispose()

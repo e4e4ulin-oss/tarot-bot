@@ -72,6 +72,14 @@ def _park_tables_without_tenant_key(conn) -> list[str]:
     tables = set(inspector.get_table_names())
     parked = []
     for table in REBUILT_FOR_TENANT:
+        # Прошлая пересборка могла оборваться после переименования: тогда данные
+        # лежат в отставленной таблице, а новая пустая. Доливаем, а не теряем.
+        if f"{table}_pre_tenant" in tables:
+            logger.warning("Нахожу недоделанную пересборку %s — доливаю", table)
+            if table in tables:
+                conn.execute(text(f"DROP TABLE {table}"))
+            parked.append(table)
+            continue
         if table not in tables:
             continue
         columns = {column["name"] for column in inspector.get_columns(table)}
@@ -117,6 +125,16 @@ def _refill_rebuilt_tables(conn, parked: list[str]) -> None:
 
 
 async def init_models(engine: AsyncEngine) -> None:
+    try:
+        await _upgrade(engine)
+    except Exception:
+        # Бот не поднимется с недостроенной схемой, и молча гадать по трейсу
+        # на сервере неудобно: пишем, что именно не доехало
+        logger.exception("Схему базы обновить не удалось")
+        raise
+
+
+async def _upgrade(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
         await conn.run_sync(_add_missing_columns)
         parked = await conn.run_sync(_park_tables_without_tenant_key)
