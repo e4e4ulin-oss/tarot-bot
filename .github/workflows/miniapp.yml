@@ -1,0 +1,37 @@
+# Публикация колоды на GitHub Pages.
+#
+# Pages умеет брать содержимое только из корня ветки или из docs/, а приложение
+# лежит в miniapp/ — поэтому публикуем не веткой, а этим действием: оно забирает
+# нужную папку и отдаёт её Pages как есть.
+name: miniapp
+
+on:
+  push:
+    branches: [miniapp]
+    paths: ["miniapp/**", ".github/workflows/miniapp.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Параллельные выкладки друг друга не отменяют: публикуется последняя
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: miniapp
+      - id: deploy
+        uses: actions/deploy-pages@v4
