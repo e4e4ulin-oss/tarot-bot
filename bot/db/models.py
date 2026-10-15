@@ -11,6 +11,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -73,6 +74,11 @@ class User(Base):
     # а приводить к UTC без него значит врать точностью
     birth_time: Mapped[str | None] = mapped_column(String(5))
     birth_city: Mapped[str | None] = mapped_column(String(64))
+    # Координаты и пояс выбранного города: справочник со временем
+    # меняется, а небо человека меняться не должно
+    birth_lat: Mapped[float | None] = mapped_column(Float)
+    birth_lon: Mapped[float | None] = mapped_column(Float)
+    birth_tz: Mapped[str | None] = mapped_column(String(48))
     city: Mapped[str | None] = mapped_column(String(64))
 
     @property

@@ -1027,3 +1027,33 @@ async def test_the_cabinet_says_whether_it_understood_the_city(env):
     session.clear()
     await feed(dp, bot, make_message("деревня Малые Выселки", chat_id=chat), 4)
     assert any("не нашёл" in text for text in session.texts()), session.texts()
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_namesake_cities_are_offered_for_a_choice(env):
+    """Ростов-на-Дону и Ростов Великий — разное небо; выбирает человек."""
+    dp, bot, session, factory = env
+    chat = 1046
+
+    await feed(dp, bot, make_callback("profile:birth_city", chat_id=chat), 1)
+    session.clear()
+    await feed(dp, bot, make_message("Ростов", chat_id=chat), 2)
+
+    assert any("несколько" in text for text in session.texts()), session.texts()
+    buttons = [
+        button.callback_data
+        for call in session.calls
+        if getattr(call, "reply_markup", None)
+        for row in call.reply_markup.inline_keyboard
+        for button in row
+        if button.callback_data.startswith("place:")
+    ]
+    assert len(buttons) >= 2
+
+    # Выбираем маленький Ростов — и в кабинете остаётся именно он
+    await feed(dp, bot, make_callback(buttons[1], chat_id=chat), 3)
+    async with factory() as db:
+        user = await Repo(db).get_user(chat)
+
+    assert user.birth_lat is not None
+    assert abs(user.birth_lat - 57.18) < 0.5  # Ростов Великий, а не Дон

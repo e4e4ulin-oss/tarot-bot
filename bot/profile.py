@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
+from .geo import Place
 from .natal import chart
 from .tarot import life_card, year_card
 
@@ -56,6 +57,18 @@ def parse_city(text: str) -> str | None:
     return city
 
 
+def stored_place(user) -> Place | None:
+    """Место, которое человек подтвердил сам. Справочник мог с тех пор поменяться."""
+    if user is None or user.birth_lat is None or user.birth_lon is None:
+        return None
+    return Place(
+        name=user.birth_city or "",
+        latitude=user.birth_lat,
+        longitude=user.birth_lon,
+        timezone=user.birth_tz or "UTC",
+    )
+
+
 def describe(user) -> str:
     """Что бот знает о человеке — его же словами, без пустых строк.
 
@@ -76,5 +89,12 @@ def describe(user) -> str:
         lines.append(f"Сейчас живёт: {user.city}")
 
     if user is not None and user.birth_date:
-        lines.extend(chart(user.birth_date, user.birth_time, user.birth_city).lines())
+        lines.extend(
+            chart(
+                user.birth_date,
+                user.birth_time,
+                user.birth_city,
+                place=stored_place(user),
+            ).lines()
+        )
     return "\n".join(lines)
