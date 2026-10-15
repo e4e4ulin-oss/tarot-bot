@@ -252,6 +252,11 @@ EnvironmentFile=$ENV_FILE
 ExecStart=$PROJECT_DIR/.venv/bin/python -m bot
 Restart=always
 RestartSec=5
+# Падающий бот не должен запереть себя насовсем: systemd по умолчанию
+# сдаётся после пяти попыток за десять секунд и дальше ждёт человека.
+# Здесь предел снят, перезапуск и так раз в пять секунд, а чинится всё
+# следующим коммитом — автообновление работает отдельным таймером.
+StartLimitIntervalSec=0
 
 [Install]
 WantedBy=multi-user.target

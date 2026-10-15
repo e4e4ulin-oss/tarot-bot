@@ -92,5 +92,8 @@ if [ "$RESTART" = "no" ]; then
   exit "$UPDATE_APPLIED"
 fi
 
+# Служба могла упереться в предел перезапусков на старой версии: без
+# сброса systemd откажется её поднимать, и свежий код никто не запустит
+systemctl reset-failed "$SERVICE" 2>/dev/null || true
 systemctl restart "$SERVICE"
 log "бот перезапущен на ${fresh:0:7}"
