@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 COMMANDS = [
     BotCommand(command="start", description="Меню"),
     BotCommand(command="daily", description="Карта дня"),
+    BotCommand(command="deck", description="Колода целиком"),
     BotCommand(command="help", description="Как пользоваться"),
     BotCommand(command="cancel", description="Отменить текущее действие"),
 ]
