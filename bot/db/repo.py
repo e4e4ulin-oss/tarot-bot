@@ -16,6 +16,7 @@ from .models import (
     Payment,
     Reading,
     ReadingMode,
+    Tenant,
     User,
     utcnow,
 )
@@ -388,3 +389,39 @@ class Repo:
             "orders": orders,
             "open_orders": open_orders,
         }
+
+    # --- Арендаторы -------------------------------------------------------
+    async def tenants_overview(self) -> list[dict[str, object]]:
+        """Сводка для владельца сервиса: кто работает и сколько принёс.
+
+        Запрос намеренно не ограничен арендатором: это единственное место,
+        где смотрят поверх всех брендов, и смотрит владелец.
+        """
+        rows = (await self.session.execute(select(Tenant).order_by(Tenant.id))).scalars().all()
+        overview = []
+        for tenant in rows:
+            users = await self.session.scalar(
+                select(func.count()).select_from(User).where(User.tenant_id == tenant.id)
+            )
+            readings = await self.session.scalar(
+                select(func.count()).select_from(Reading).where(Reading.tenant_id == tenant.id)
+            )
+            paid, total = (
+                await self.session.execute(
+                    select(func.count(), func.coalesce(func.sum(Payment.amount), 0)).where(
+                        Payment.tenant_id == tenant.id
+                    )
+                )
+            ).one()
+            overview.append(
+                {
+                    "slug": tenant.slug,
+                    "title": tenant.title,
+                    "active": tenant.active,
+                    "users": int(users or 0),
+                    "readings": int(readings or 0),
+                    "paid": int(paid or 0),
+                    "total": int(total or 0),
+                }
+            )
+        return overview

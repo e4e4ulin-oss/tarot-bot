@@ -139,3 +139,25 @@ async def test_orders_and_readings_are_not_readable_across_tenants(factory):
         assert await first.get_reading(reading.id) is not None
         assert await second.get_reading(reading.id) is None
         assert await second.open_orders() == []
+
+
+@pytest.mark.asyncio
+async def test_overview_counts_each_brand_separately(factory):
+    from bot.db import Repo
+
+    settings = Settings(**BASE)
+    async with factory() as db:
+        await ensure_default(db, settings)
+        db.add(Tenant(slug="second", title="Второй", bot_token="3:x", bot_id=3))
+        await db.commit()
+
+        await Repo(db, 1).upsert_user(10, None, "Клиент первого")
+        await Repo(db, 2).upsert_user(20, None, "Клиент второго")
+        await Repo(db, 2).add_payment(20, 369, "RUB", "c-1")
+
+        overview = {row["slug"]: row for row in await Repo(db).tenants_overview()}
+
+    assert overview["default"]["users"] == 1
+    assert overview["second"]["users"] == 1
+    assert overview["default"]["paid"] == 0
+    assert overview["second"]["paid"] == 1 and overview["second"]["total"] == 369
