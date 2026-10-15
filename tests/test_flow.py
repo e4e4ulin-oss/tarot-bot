@@ -125,6 +125,11 @@ async def app(tmp_path_factory):
         ADMIN_IDS=str(ADMIN_ID),
         DATABASE_URL=f"sqlite+aiosqlite:///{db_path}",
         XAI_API_KEY="",
+        # Эти тесты про сценарий расклада, а не про доступ к нему:
+        # ворота открыты, лимит проверяется отдельным тестом ниже.
+        FREE_AUTO_READINGS=50,
+        FREE_NEEDS_DAILY=False,
+        DAILY_AUTO_LIMIT=5,
     )
     engine = create_engine(settings.database_url)
     await init_models(engine)

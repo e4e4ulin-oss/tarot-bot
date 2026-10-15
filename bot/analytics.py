@@ -16,6 +16,10 @@ TIER_CHOSEN: Final = "tier_chosen"
 ORDER_SENT: Final = "order_sent"
 ORDER_ANSWERED: Final = "order_answered"
 
+# Платный расклад: шаг не воронки заявок, а своей — бесплатное в платное
+PAYWALL: Final = "paywall"
+PAID: Final = "paid"
+
 # Карта дня живёт рядом с воронкой, но в неё не входит: это не путь к заказу
 DAILY_OPEN: Final = "daily_open"
 DAILY_SUBSCRIBED: Final = "daily_subscribed"

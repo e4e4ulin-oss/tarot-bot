@@ -13,6 +13,7 @@ from .models import (
     Event,
     Order,
     OrderStatus,
+    Payment,
     Reading,
     ReadingMode,
     User,
@@ -23,6 +24,46 @@ from .models import (
 class Repo:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    # --- Платежи и доступ ------------------------------------------------
+    async def count_auto_readings(self, user_id: int) -> int:
+        """Сколько авто-раскладов человек сделал за всё время."""
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(Reading)
+            .where(Reading.user_id == user_id, Reading.mode == ReadingMode.AUTO)
+        )
+        return int(result.scalar_one())
+
+    async def add_payment(
+        self, user_id: int, amount: int, currency: str, charge_id: str | None
+    ) -> Payment:
+        payment = Payment(
+            user_id=user_id, amount=amount, currency=currency, charge_id=charge_id
+        )
+        self.session.add(payment)
+        await self.session.commit()
+        return payment
+
+    async def unspent_payment(self, user_id: int) -> Payment | None:
+        result = await self.session.execute(
+            select(Payment)
+            .where(Payment.user_id == user_id, Payment.spent_at.is_(None))
+            .order_by(Payment.created_at)
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def spend_payment(self, payment: Payment) -> None:
+        payment.spent_at = utcnow()
+        await self.session.commit()
+
+    async def payments_summary(self, since: datetime | None = None) -> dict[str, int]:
+        query = select(func.count(), func.coalesce(func.sum(Payment.amount), 0))
+        if since is not None:
+            query = query.where(Payment.created_at >= since)
+        count, total = (await self.session.execute(query)).one()
+        return {"count": int(count), "total": int(total)}
 
     # --- Пользователи ---------------------------------------------------
     async def upsert_user(self, user_id: int, username: str | None, first_name: str | None) -> User:

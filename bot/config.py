@@ -33,6 +33,18 @@ class Settings(BaseSettings):
     author_price_full: int = Field(default=1000, alias="AUTHOR_PRICE_FULL")
     author_currency: str = Field(default="₽", alias="AUTHOR_CURRENCY")
 
+    # --- Доступ к авто-раскладам ---
+    # Сколько раскладов человек получает бесплатно за всё время. 0 — платно сразу.
+    free_auto_readings: int = Field(default=3, alias="FREE_AUTO_READINGS")
+    # Бесплатные расклады даются подписанным на карту дня: подписка тоже бесплатна
+    free_needs_daily: bool = Field(default=True, alias="FREE_NEEDS_DAILY")
+    # Цена одного расклада после того, как бесплатные кончились
+    auto_reading_price: int = Field(default=369, alias="AUTO_READING_PRICE")
+    # Токен платёжного провайдера от BotFather. Пусто — оплата не предлагается,
+    # и бот честно говорит, что платные расклады пока не подключены.
+    payment_provider_token: str = Field(default="", alias="PAYMENT_PROVIDER_TOKEN")
+    payment_currency: str = Field(default="RUB", alias="PAYMENT_CURRENCY")
+
     # --- Мини-приложение ---
     # Адрес опубликованной колоды. По умолчанию — страница, которую собирает
     # сам этот репозиторий: отдельной настройки на сервере она не требует.
@@ -94,7 +106,10 @@ class Settings(BaseSettings):
     image_cards_limit: int = Field(default=3, alias="IMAGE_CARDS_LIMIT")
 
     # --- Правила работы ---
-    daily_auto_limit: int = Field(default=5, alias="DAILY_AUTO_LIMIT")
+    # Предохранитель на случай, если кто-то начнёт молотить расклады подряд.
+    # По умолчанию выключен: число бесплатных раскладов и так ограничено,
+    # а оплаченный расклад суточным лимитом резать нечестно.
+    daily_auto_limit: int = Field(default=0, alias="DAILY_AUTO_LIMIT")
     allow_reversed: bool = Field(default=True, alias="ALLOW_REVERSED")
     reversed_chance: float = Field(default=0.4, alias="REVERSED_CHANCE")
     max_question_length: int = Field(default=500, alias="MAX_QUESTION_LENGTH")

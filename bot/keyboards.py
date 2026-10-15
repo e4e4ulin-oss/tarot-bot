@@ -128,3 +128,21 @@ def followup_menu(order_id: int) -> InlineKeyboardMarkup:
     builder.button(text="‹ Меню", callback_data="menu:main")
     builder.adjust(1)
     return builder.as_markup()
+
+
+def paywall_menu(price: int, currency: str) -> InlineKeyboardMarkup:
+    """Оплата расклада: одна кнопка с ценой, вторая — назад."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text=f"Оплатить {price} {currency}", callback_data="pay:auto")
+    builder.button(text="‹ Меню", callback_data="menu:main")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def subscribe_menu() -> InlineKeyboardMarkup:
+    """Подписка на карту дня — условие бесплатных раскладов."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔔 Подписаться на карту дня", callback_data="daily:on")
+    builder.button(text="‹ Меню", callback_data="menu:main")
+    builder.adjust(1)
+    return builder.as_markup()

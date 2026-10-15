@@ -275,12 +275,18 @@ async def cmd_stats(
 
     tiers_block = _tiers_block(settings, await repo.orders_by_tier(since))
 
+    # Деньги идут на счёт владельца бота, но след платежа остаётся здесь
+    paid = await repo.payments_summary(since)
+
     await message.answer(
         texts.ADMIN_STATS.format(
             period=period,
             funnel=_funnel_table(steps),
             orders_by_tier=tiers_block,
             daily_subscribers=await repo.count_daily_subscribers(),
+            paid_count=paid["count"],
+            paid_total=paid["total"],
+            currency=settings.author_currency,
             **await repo.stats(),
         )
     )

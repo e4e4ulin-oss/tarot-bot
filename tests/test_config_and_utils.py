@@ -24,7 +24,7 @@ def test_empty_values_fall_back_to_defaults():
     )
     assert settings.admin_chat_id == 0
     assert settings.admin_ids == []
-    assert settings.daily_auto_limit == 5
+    assert settings.daily_auto_limit == 0
     assert settings.reversed_chance == 0.4
     assert settings.grok_timeout == 30.0
     assert settings.grok_deadline == 45.0

@@ -27,6 +27,7 @@ def test_router_order_keeps_fallback_last():
         "auto",
         "author",
         "miniapp",
+        "payments",
         "fallback",
     ]
 

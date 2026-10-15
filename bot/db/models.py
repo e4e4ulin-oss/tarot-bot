@@ -174,3 +174,25 @@ class DailyCard(Base):
     # Отправлена ли она утренней рассылкой (а не открыта человеком самому)
     delivered: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Payment(Base):
+    """Оплаченный авто-расклад.
+
+    Хранится не баланс, а сами платежи: по ним видно, сколько и когда занесли,
+    а остаток считается как «оплачено минус потрачено». Деньги приходят на счёт
+    франчайзи, в базе остаётся только след.
+    """
+
+    __tablename__ = "payments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    amount: Mapped[int] = mapped_column(Integer)
+    currency: Mapped[str] = mapped_column(String(8), default="RUB")
+    charge_id: Mapped[str | None] = mapped_column(String(128), unique=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, index=True
+    )
+    # Проставляется, когда по этому платежу сделан расклад
+    spent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
