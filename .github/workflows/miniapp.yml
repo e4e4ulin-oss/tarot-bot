@@ -7,7 +7,7 @@ name: miniapp
 
 on:
   push:
-    branches: [miniapp]
+    branches: [main]
     paths: ["miniapp/**", ".github/workflows/miniapp.yml"]
   workflow_dispatch:
 

@@ -26,8 +26,8 @@ from generate_cards import inspect  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 CARDS = ROOT / "docs" / "design" / "cards"
-BOARD = ROOT.parent / "miniapp" / "cards"
-DECK = ROOT.parent / "miniapp" / "cards.json"
+BOARD = ROOT / "miniapp" / "cards"
+DECK = ROOT / "miniapp" / "cards.json"
 
 CARD_SIZE = (1024, 1536)
 BOARD_SIZE = (720, 1080)

@@ -22,7 +22,7 @@ from PIL import Image, ImageDraw, ImageFilter
 
 ROOT = Path(__file__).resolve().parent.parent
 CARDS = ROOT / "docs" / "design" / "cards"
-BOARD = ROOT.parent / "miniapp" / "cards"
+BOARD = ROOT / "miniapp" / "cards"
 
 SIZE = (1024, 1536)
 BOARD_SIZE = (720, 1080)

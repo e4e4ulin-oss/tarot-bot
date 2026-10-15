@@ -31,7 +31,7 @@ from generate_cards import MANIFEST, hex_to_rgb, inspect  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 CARDS = ROOT / "docs" / "design" / "cards"
-BOARD = ROOT.parent / "miniapp" / "cards"
+BOARD = ROOT / "miniapp" / "cards"
 BOARD_SIZE = (720, 1080)
 
 
