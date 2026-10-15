@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
+from .natal import chart
 from .tarot import life_card, year_card
 
 SKIP = {"не знаю", "незнаю", "не помню", "пропустить", "-", "—", "нет"}
@@ -73,4 +74,7 @@ def describe(user) -> str:
         lines.append(f"Город рождения: {user.birth_city}")
     if user is not None and user.city:
         lines.append(f"Сейчас живёт: {user.city}")
+
+    if user is not None and user.birth_date:
+        lines.extend(chart(user.birth_date, user.birth_time, user.birth_city).lines())
     return "\n".join(lines)
