@@ -76,7 +76,10 @@ COMMON = """\
 # Границы приёмки — те же, по которым принимались Правосудие и рубашка
 MAX_BACKGROUND_DELTA = 14.0
 MAX_TITLE_SPREAD = 18.0
-FIGURE_RANGE = (0.18, 0.34)
+# Ниже этой доли высоты фигура лезет в поле под надпись. Верхней границы нет:
+# лишний пустой фон сверху подписи не мешает, а на сюжетных младших картах
+# фигура и должна стоять низко.
+FIGURE_FLOOR = 0.18
 # Ниже этого запаса по светлому фигура перестаёт лепиться светом и на доске
 # превращается в пятно. Перерисовку не требует — но знать об этом надо.
 MIN_FIGURE_RELIEF = 10.0
@@ -130,7 +133,7 @@ def inspect(path: Path, tone_hex: str) -> Check:
         problems.append(f"фон разошёлся на {delta:.1f}")
     if spread > MAX_TITLE_SPREAD:
         problems.append(f"поле под надпись шумное ({spread:.1f})")
-    if not FIGURE_RANGE[0] <= figure_at <= FIGURE_RANGE[1]:
+    if figure_at < FIGURE_FLOOR:
         problems.append(f"фигура начинается на {figure_at:.0%}")
 
     report = (
