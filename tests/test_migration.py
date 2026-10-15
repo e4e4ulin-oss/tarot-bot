@@ -95,3 +95,51 @@ async def test_empty_database_is_created_from_scratch(tmp_path: Path):
 
     assert "tier" in await columns(engine, "orders")
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_rebuilt_tables_keep_their_rows(tmp_path: Path):
+    """Ключ в SQLite на месте не меняется, поэтому две таблицы пересобираются.
+
+    Проверяем самое неприятное: при пересборке не потерялись ни люди, ни их
+    подписка, ни кэш картинок — и всё досталось арендатору номер один.
+    """
+    engine = create_engine(f"sqlite+aiosqlite:///{tmp_path / 'live.db'}")
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "CREATE TABLE users (id INTEGER PRIMARY KEY, username VARCHAR(64), "
+                "first_name VARCHAR(128), created_at DATETIME, "
+                "daily_subscribed BOOLEAN DEFAULT 0 NOT NULL)"
+            )
+        )
+        await conn.execute(
+            text("CREATE TABLE card_images (card_id VARCHAR(32) PRIMARY KEY, file_id VARCHAR(256))")
+        )
+        await conn.execute(
+            text(
+                "INSERT INTO users (id, username, first_name, created_at, daily_subscribed) "
+                "VALUES (42, 'клиент', 'Клиент', '2026-01-01 00:00:00', 1)"
+            )
+        )
+        await conn.execute(
+            text("INSERT INTO card_images (card_id, file_id) VALUES ('major_00', 'file-42')")
+        )
+
+    await init_models(engine)
+
+    assert "tenant_id" in await columns(engine, "users")
+    factory = create_session_factory(engine)
+    async with factory() as session:
+        repo = Repo(session, 1)
+        user = await repo.get_user(42)
+        assert user is not None and user.first_name == "Клиент"
+        assert await repo.is_daily_subscribed(42) is True
+        assert await repo.card_file_ids(["major_00"]) == {"major_00": "file-42"}
+
+    # Временная таблица убрана за собой
+    async with engine.begin() as conn:
+        rows = (await conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))).all()
+    assert not [name for (name,) in rows if name.endswith("_pre_tenant")]
+
+    await engine.dispose()

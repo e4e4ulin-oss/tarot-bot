@@ -401,3 +401,24 @@ async def cmd_restart(message: Message, server: ServerOps) -> None:
     result = await server.restart()
     if not result.ok:
         await message.answer(texts.SERVER_UNAVAILABLE.format(output=_tail(result.output)))
+
+
+@router.message(Command("tenants"))
+async def cmd_tenants(message: Message, repo: Repo) -> None:
+    """Сводка по брендам: единственное место, где видно поверх всех арендаторов."""
+    rows = await repo.tenants_overview()
+    if not rows:
+        await message.answer("Арендаторов нет.")
+        return
+
+    lines = [f"{'бренд':<16}{'люди':>6}{'раск.':>7}{'оплат':>7}{'сумма':>8}"]
+    for row in rows:
+        title = row["title"] if row["active"] else f"{row['title']} ⏸"
+        lines.append(
+            f"{title[:16]:<16}{row['users']:>6}{row['readings']:>7}"
+            f"{row['paid']:>7}{row['total']:>8}"
+        )
+
+    await message.answer(
+        texts.ADMIN_TENANTS.format(table="\n".join(lines), hint=texts.ADMIN_TENANTS_HINT)
+    )
