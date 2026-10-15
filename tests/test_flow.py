@@ -19,6 +19,7 @@ from aiogram.types import CallbackQuery, Chat, MessageId, PhotoSize, Update, Use
 from aiogram.types import Message as TgMessage
 
 from bot.__main__ import build_dispatcher
+from bot.tenants import ensure_default
 from bot.config import Settings
 from bot.db import OrderStatus, Repo, create_engine, create_session_factory, init_models
 from bot.services import UPDATE_APPLIED, CommandResult, GrokClient, Interpreter
@@ -134,6 +135,11 @@ async def app(tmp_path_factory):
     engine = create_engine(settings.database_url)
     await init_models(engine)
     factory = create_session_factory(engine)
+
+    # Боту нужен арендатор: без него мидлварь не знает, чьи настройки брать,
+    # и молчит — ровно то, что должно происходить с чужим ботом
+    async with factory() as db:
+        await ensure_default(db, settings)
 
     session = FakeSession()
     bot = Bot(

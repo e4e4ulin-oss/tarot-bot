@@ -16,7 +16,12 @@ from pydantic import ValidationError
 from .config import Settings, describe_missing_settings, get_settings
 from .db import create_engine, create_session_factory, init_models
 from .handlers import build_router
-from .middlewares import DbSessionMiddleware, ThrottlingMiddleware, UserMiddleware
+from .middlewares import (
+    DbSessionMiddleware,
+    TenantMiddleware,
+    ThrottlingMiddleware,
+    UserMiddleware,
+)
 from .services import GrokClient, Interpreter, ServerOps
 from .services.daily import DailyCards
 
@@ -45,6 +50,8 @@ def build_dispatcher(
     dp["server"] = server or ServerOps(settings.service_name, settings.update_script)
 
     dp.update.middleware(DbSessionMiddleware(session_factory))
+    # Порядок важен: арендатор ищется по уже открытой сессии
+    dp.update.middleware(TenantMiddleware(settings))
     dp.update.middleware(UserMiddleware())
     if throttle_rate > 0:
         dp.message.middleware(ThrottlingMiddleware(throttle_rate))
@@ -89,28 +96,44 @@ async def main() -> None:
         grok, author_name=settings.author_name, deadline=settings.grok_deadline
     )
 
-    bot = Bot(
-        settings.bot_token,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-    )
+    async with session_factory() as session:
+        await ensure_default(session, settings)
+        tenants = await active_tenants(session)
+
+    if not tenants:
+        raise SystemExit(
+            "Нет ни одного арендатора: заведите бота в таблице tenants "
+            "или задайте BOT_TOKEN, и он станет арендатором по умолчанию."
+        )
+
+    bots = [
+        Bot(tenant.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+        for tenant in tenants
+    ]
     dp = build_dispatcher(settings, interpreter, session_factory)
 
-    daily: asyncio.Task | None = None
+    tasks: list[asyncio.Task] = []
     try:
-        await bot.set_my_commands(COMMANDS)
-        await bot.delete_webhook(drop_pending_updates=True)
+        for bot, tenant in zip(bots, tenants, strict=True):
+            await bot.set_my_commands(COMMANDS)
+            await bot.delete_webhook(drop_pending_updates=True)
+            if settings.daily_card_enabled:
+                # У каждого арендатора своя рассылка: свой бот и свои подписчики
+                brand = settings_for(tenant, settings)
+                tasks.append(asyncio.create_task(DailyCards(bot, brand, session_factory).run()))
+            logger.info("Бот «%s» запущен", tenant.title)
+
         if settings.daily_card_enabled:
-            daily = asyncio.create_task(DailyCards(bot, settings, session_factory).run())
             logger.info("Карта дня: рассылка в %s:00", settings.daily_card_hour)
-        logger.info("Бот запущен")
-        await dp.start_polling(bot)
+        await dp.start_polling(*bots)
     finally:
-        if daily is not None:
-            daily.cancel()
+        for task in tasks:
+            task.cancel()
             with suppress(asyncio.CancelledError):
-                await daily
+                await task
         await grok.close()
-        await bot.session.close()
+        for bot in bots:
+            await bot.session.close()
         await engine.dispose()
 
 

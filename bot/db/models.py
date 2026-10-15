@@ -196,3 +196,44 @@ class Payment(Base):
     )
     # Проставляется, когда по этому платежу сделан расклад
     spent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class Tenant(Base):
+    """Бренд, работающий на этом сервисе: один арендатор — один бот.
+
+    Франчайзи получает собственного бота под своим именем, но код, сервер и
+    база остаются общими. Всё, чем один бренд отличается от другого, лежит
+    здесь: токен, имя, цены, платёжный провайдер. Имя и аватарку бота владелец
+    ставит у BotFather сам — туда сервис не лезет.
+    """
+
+    __tablename__ = "tenants"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    slug: Mapped[str] = mapped_column(String(32), unique=True)
+    title: Mapped[str] = mapped_column(String(128))
+
+    bot_token: Mapped[str] = mapped_column(String(64), unique=True)
+    # Числовая часть токена: по ней обновление сопоставляется с арендатором
+    bot_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
+
+    admin_chat_id: Mapped[int] = mapped_column(BigInteger, default=0)
+    admin_ids: Mapped[list[int]] = mapped_column(JSON, default=list)
+
+    author_name: Mapped[str] = mapped_column(String(64), default="таролог")
+    currency: Mapped[str] = mapped_column(String(8), default="₽")
+
+    price_short: Mapped[int] = mapped_column(Integer, default=500)
+    price_base: Mapped[int] = mapped_column(Integer, default=700)
+    price_full: Mapped[int] = mapped_column(Integer, default=1000)
+
+    free_auto_readings: Mapped[int] = mapped_column(Integer, default=3)
+    free_needs_daily: Mapped[bool] = mapped_column(Boolean, default=True)
+    auto_reading_price: Mapped[int] = mapped_column(Integer, default=369)
+    # Деньги идут на счёт арендатора, поэтому и токен провайдера его
+    payment_provider_token: Mapped[str] = mapped_column(String(128), default="")
+
+    miniapp_url: Mapped[str] = mapped_column(String(256), default="")
+
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

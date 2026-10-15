@@ -6,8 +6,10 @@ from .models import (
     Event,
     Order,
     OrderStatus,
+    Payment,
     Reading,
     ReadingMode,
+    Tenant,
     User,
 )
 from .repo import Repo
@@ -21,9 +23,11 @@ __all__ = [
     "Event",
     "Order",
     "OrderStatus",
+    "Payment",
     "Reading",
     "ReadingMode",
     "Repo",
+    "Tenant",
     "User",
     "create_engine",
     "create_session_factory",
