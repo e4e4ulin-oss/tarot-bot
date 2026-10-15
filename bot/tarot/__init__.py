@@ -1,3 +1,4 @@
+from .birth import life_card, life_number, year_card, year_number
 from .deck import Card, card_title, get_card, load_deck
 from .draw import DrawnCard, deserialize, draw_spread, serialize, yes_no_verdict
 from .images import cache_key, commons_url, local_path, reversed_image_bytes, rotate_180
@@ -24,9 +25,13 @@ __all__ = [
     "format_meanings",
     "get_card",
     "get_spread",
+    "life_card",
+    "life_number",
     "load_deck",
     "mix",
     "rng_for",
     "serialize",
+    "year_card",
+    "year_number",
     "yes_no_verdict",
 ]
