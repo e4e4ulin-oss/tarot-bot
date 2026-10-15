@@ -27,9 +27,10 @@ async def repo(tmp_path):
     await engine.dispose()
 
 
-async def make_reading(repo: Repo) -> None:
+async def make_reading(repo: Repo, user_id: int = USER) -> None:
     await repo.save_reading(
-        user_id=USER, spread_key="day", question=None, cards=[], interpretation="", ai_used=False
+        user_id=user_id, spread_key="day", question=None, cards=[],
+        interpretation="", ai_used=False,
     )
 
 
@@ -77,3 +78,28 @@ async def test_payments_are_counted_for_the_owner(repo):
     await repo.add_payment(USER, 369, "RUB", "charge-2")
     await repo.add_payment(USER, 369, "RUB", "charge-3")
     assert await repo.payments_summary() == {"count": 2, "total": 738}
+
+
+@pytest.mark.asyncio
+async def test_the_owner_is_not_counted(repo):
+    """Лимит придуман для клиентов: владельцу он мешает смотреть свой же бот."""
+    settings = make_settings(FREE_AUTO_READINGS=1, ADMIN_IDS=str(USER))
+
+    for _ in range(5):
+        access = await check(repo, settings, USER)
+        assert access.allowed and access.reason == "owner"
+        await make_reading(repo)
+
+    # Обычному человеку те же пять раскладов уже перекрыли бы доступ
+    other = 501
+    await repo.upsert_user(other, None, "Клиент")
+    await repo.set_daily_subscription(other, True)
+    assert await repo.count_auto_readings(other) == 0
+    assert (await check(repo, settings, other)).reason == "free"
+
+
+@pytest.mark.asyncio
+async def test_admin_chat_owner_is_free_too(repo):
+    """Владелец мог не вписать себя в ADMIN_IDS — но заявки идут ему в личку."""
+    settings = make_settings(FREE_AUTO_READINGS=0, ADMIN_CHAT_ID=str(USER))
+    assert (await check(repo, settings, USER)).reason == "owner"

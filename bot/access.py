@@ -19,12 +19,19 @@ class Access:
     """Чем оплачен этот расклад и сколько бесплатных осталось."""
 
     allowed: bool
-    reason: str  # free | paid | needs_daily | needs_payment
+    reason: str  # owner | free | paid | needs_daily | needs_payment
     free_left: int
     payment: Payment | None = None
 
 
 async def check(repo: Repo, settings: Settings, user_id: int) -> Access:
+    # Владелец бота и его администраторы раскладывают сколько нужно: лимит
+    # придуман для клиентов, а им самим он мешает смотреть, как работает бот
+    # ADMIN_CHAT_ID в личной переписке совпадает с номером человека, поэтому
+    # владелец остаётся владельцем, даже если забыл вписать себя в ADMIN_IDS
+    if settings.is_admin(user_id) or user_id == settings.admin_chat_id:
+        return Access(True, "owner", free_left=0)
+
     used = await repo.count_auto_readings(user_id)
     free_left = max(0, settings.free_auto_readings - used)
 
