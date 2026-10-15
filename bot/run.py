@@ -33,6 +33,8 @@ COMMANDS = [
     BotCommand(command="daily", description="Карта дня"),
     BotCommand(command="deck", description="Колода целиком"),
     BotCommand(command="profile", description="Личный кабинет"),
+    BotCommand(command="chart", description="Натальная карта"),
+    BotCommand(command="forecast", description="Астрологический прогноз"),
     BotCommand(command="help", description="Как пользоваться"),
     BotCommand(command="cancel", description="Отменить текущее действие"),
 ]

@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 import pytest_asyncio
@@ -1057,3 +1057,66 @@ async def test_namesake_cities_are_offered_for_a_choice(env):
 
     assert user.birth_lat is not None
     assert abs(user.birth_lat - 57.18) < 0.5  # Ростов Великий, а не Дон
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_the_chart_asks_for_a_birth_date_first(env):
+    dp, bot, session, _ = env
+    chat = 1047
+
+    session.clear()
+    await feed(dp, bot, make_callback("chart:show", chat_id=chat), 1)
+    assert any("дата рождения" in text.lower() for text in session.texts()), session.texts()
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_the_chart_shows_planets_houses_and_aspects(env):
+    dp, bot, session, factory = env
+    chat = 1048
+
+    async with factory() as db:
+        repo = Repo(db)
+        await repo.upsert_user(chat, None, "Клиент")
+        await repo.save_profile(
+            chat,
+            birth_date=date(1998, 5, 21),
+            birth_time="07:05",
+            birth_city="Энгельс",
+            birth_lat=51.48389,
+            birth_lon=46.10528,
+            birth_tz="Europe/Saratov",
+        )
+
+    session.clear()
+    await feed(dp, bot, make_callback("chart:show", chat_id=chat), 1)
+    body = "\n".join(session.texts())
+
+    assert "Асцендент" in body and "Середина неба" in body
+    assert "Плутон" in body and "дом" in body
+    assert "Аспекты" in body
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_the_forecast_shows_the_calculation_even_without_a_model(env):
+    """Модель в тестах выключена: расчёт обязан дойти до человека и так."""
+    dp, bot, session, factory = env
+    chat = 1049
+
+    async with factory() as db:
+        repo = Repo(db)
+        await repo.upsert_user(chat, None, "Клиент")
+        await repo.save_profile(
+            chat,
+            birth_date=date(1990, 3, 14),
+            birth_time="15:30",
+            birth_city="Москва",
+            birth_lat=55.75204,
+            birth_lon=37.61781,
+            birth_tz="Europe/Moscow",
+        )
+
+    session.clear()
+    await feed(dp, bot, make_callback("chart:forecast", chat_id=chat), 1)
+    body = "\n".join(session.texts())
+
+    assert "транзит" in body.lower() or "тихо" in body.lower() or "нет" in body.lower()
