@@ -14,6 +14,7 @@ from aiogram.types import CallbackQuery, Message
 from .. import profile as parse
 from .. import texts
 from ..db import Repo
+from ..geo import find
 from ..keyboards import profile_menu
 from ..states import ProfileFlow
 
@@ -26,6 +27,15 @@ FIELDS = {
     "birth_city": (parse.parse_city, texts.PROFILE_BAD_CITY, ProfileFlow.birth_city),
     "city": (parse.parse_city, texts.PROFILE_BAD_CITY, ProfileFlow.city),
 }
+
+
+def confirmation(field: str, value: object) -> str:
+    """Город рождения подтверждается отдельно: по нему считается асцендент,
+    и человек должен сразу знать, понял его бот или нет."""
+    if field != "birth_city":
+        return texts.PROFILE_SAVED
+    place = find(str(value))
+    return texts.CITY_FOUND.format(city=place.name) if place else texts.CITY_UNKNOWN
 
 
 async def show(message: Message, repo: Repo, *, edit: bool = False) -> None:
@@ -91,5 +101,5 @@ async def on_answer(message: Message, state: FSMContext, repo: Repo) -> None:
 
     await repo.save_profile(message.chat.id, **{field: value})
     await state.clear()
-    await message.answer(texts.PROFILE_SAVED)
+    await message.answer(confirmation(field, value))
     await show(message, repo)

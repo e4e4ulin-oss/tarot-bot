@@ -46,3 +46,23 @@ def test_an_unknown_city_does_not_break_the_chart():
 @pytest.mark.parametrize("city", ["Томск", "томск", " Томск "])
 def test_city_is_recognised_however_it_is_written(city):
     assert chart(date(1998, 5, 21), "07:05", city).place is not None
+
+
+@pytest.mark.parametrize(
+    "written",
+    [
+        "Энгельс",
+        "г. Энгельс, Саратовской обл",
+        "Энгельс, Саратовская область",
+        "г Энгельс",
+        "ЭНГЕЛЬС",
+    ],
+)
+def test_people_write_an_address_not_a_name(written):
+    """«г. Энгельс, Саратовской обл» — это тоже Энгельс."""
+    assert chart(date(1998, 5, 21), "07:05", written).place.name == "Engels"
+
+
+def test_an_unknown_place_says_why_there_is_no_ascendant():
+    lines = "\n".join(chart(date(1998, 5, 21), "07:05", "пос. Токсово").lines())
+    assert "не нашёлся на карте" in lines
