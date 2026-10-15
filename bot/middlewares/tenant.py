@@ -17,6 +17,7 @@ from aiogram.types import TelegramObject
 from sqlalchemy import select
 
 from ..config import Settings
+from ..db import Repo
 from ..db.models import Tenant
 from ..tenants import settings_for
 
@@ -49,4 +50,6 @@ class TenantMiddleware(BaseMiddleware):
 
         data["tenant"] = tenant
         data["settings"] = settings_for(tenant, self.base)
+        # Репозиторий из предыдущей мидлвари не знал, чьи это данные
+        data["repo"] = Repo(session, tenant.id)
         return await handler(event, data)

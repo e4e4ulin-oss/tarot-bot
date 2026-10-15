@@ -120,7 +120,11 @@ async def main() -> None:
             if settings.daily_card_enabled:
                 # У каждого арендатора своя рассылка: свой бот и свои подписчики
                 brand = settings_for(tenant, settings)
-                tasks.append(asyncio.create_task(DailyCards(bot, brand, session_factory).run()))
+                tasks.append(
+                    asyncio.create_task(
+                        DailyCards(bot, brand, session_factory, tenant_id=tenant.id).run()
+                    )
+                )
             logger.info("Бот «%s» запущен", tenant.title)
 
         if settings.daily_card_enabled:

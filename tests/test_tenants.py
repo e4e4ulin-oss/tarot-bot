@@ -72,3 +72,70 @@ async def test_disabled_tenant_does_not_start(factory):
         tenant.active = False
         await db.commit()
         assert await active_tenants(db) == []
+
+
+@pytest.mark.asyncio
+async def test_two_tenants_do_not_see_each_other(factory):
+    """Один и тот же человек в двух ботах — два разных клиента."""
+    from bot.db import Repo
+
+    person = 777
+    async with factory() as db:
+        first, second = Repo(db, 1), Repo(db, 2)
+
+        await first.upsert_user(person, "ник", "Он же")
+        await second.upsert_user(person, "ник", "Он же")
+
+        await first.save_reading(
+            user_id=person, spread_key="day", question=None, cards=[],
+            interpretation="", ai_used=False,
+        )
+        await first.set_daily_subscription(person, True)
+        await first.add_payment(person, 369, "RUB", "charge-A")
+
+        # У первого бренда расклад, подписка и платёж
+        assert await first.count_auto_readings(person) == 1
+        assert await first.is_daily_subscribed(person) is True
+        assert (await first.payments_summary())["count"] == 1
+        assert await first.count_daily_subscribers() == 1
+
+        # У второго — ничего из этого
+        assert await second.count_auto_readings(person) == 0
+        assert await second.is_daily_subscribed(person) is False
+        assert (await second.payments_summary())["count"] == 0
+        assert await second.count_daily_subscribers() == 0
+
+
+@pytest.mark.asyncio
+async def test_card_cache_is_not_shared_between_bots(factory):
+    """file_id выдаётся под конкретного бота: чужой кэш бесполезен."""
+    from bot.db import Repo
+
+    async with factory() as db:
+        first, second = Repo(db, 1), Repo(db, 2)
+        await first.save_card_file_id("major_00", "file-первого")
+
+        assert await first.card_file_ids(["major_00"]) == {"major_00": "file-первого"}
+        assert await second.card_file_ids(["major_00"]) == {}
+
+        await second.save_card_file_id("major_00", "file-второго")
+        assert await second.card_file_ids(["major_00"]) == {"major_00": "file-второго"}
+
+
+@pytest.mark.asyncio
+async def test_orders_and_readings_are_not_readable_across_tenants(factory):
+    from bot.db import Repo
+
+    async with factory() as db:
+        first, second = Repo(db, 1), Repo(db, 2)
+        order = await first.create_order(user_id=1, question="чужой вопрос", topic=None, contact=None)
+        reading = await first.save_reading(
+            user_id=1, spread_key="day", question=None, cards=[],
+            interpretation="", ai_used=False,
+        )
+
+        assert await first.get_order(order.id) is not None
+        assert await second.get_order(order.id) is None
+        assert await first.get_reading(reading.id) is not None
+        assert await second.get_reading(reading.id) is None
+        assert await second.open_orders() == []

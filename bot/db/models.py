@@ -54,6 +54,9 @@ ORDER_STATUS_LABELS: dict[OrderStatus, str] = {
 class User(Base):
     __tablename__ = "users"
 
+    # Один и тот же человек может писать ботам разных брендов: для каждого
+    # он отдельный клиент со своей подпиской и своей историей
+    tenant_id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
     username: Mapped[str | None] = mapped_column(String(64))
     first_name: Mapped[str | None] = mapped_column(String(128))
@@ -62,9 +65,6 @@ class User(Base):
     daily_subscribed: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="0", index=True
     )
-
-    readings: Mapped[list[Reading]] = relationship(back_populates="user")
-    orders: Mapped[list[Order]] = relationship(back_populates="user")
 
     @property
     def display(self) -> str:
@@ -78,7 +78,8 @@ class Reading(Base):
     __tablename__ = "readings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, default=1, index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
     mode: Mapped[ReadingMode] = mapped_column(Enum(ReadingMode), default=ReadingMode.AUTO)
     spread_key: Mapped[str] = mapped_column(String(32))
     question: Mapped[str | None] = mapped_column(Text)
@@ -89,14 +90,14 @@ class Reading(Base):
         DateTime(timezone=True), default=utcnow, index=True
     )
 
-    user: Mapped[User] = relationship(back_populates="readings")
-
 
 class CardImage(Base):
     """Кэш картинок: id карты → file_id в Telegram, чтобы не ходить к источнику дважды."""
 
     __tablename__ = "card_images"
 
+    # file_id выдаётся Telegram в привязке к боту: кэш чужого бота бесполезен
+    tenant_id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     card_id: Mapped[str] = mapped_column(String(32), primary_key=True)
     file_id: Mapped[str] = mapped_column(String(256))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -108,7 +109,8 @@ class Order(Base):
     __tablename__ = "orders"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, default=1, index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
     question: Mapped[str] = mapped_column(Text)
     topic: Mapped[str | None] = mapped_column(String(64))
     # Уровень разбора на момент заявки: short | base | full
@@ -125,8 +127,6 @@ class Order(Base):
         DateTime(timezone=True), default=utcnow, index=True
     )
     answered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-    user: Mapped[User] = relationship(back_populates="orders")
 
     @property
     def status_label(self) -> str:
@@ -147,6 +147,7 @@ class Event(Base):
     __tablename__ = "events"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, default=1, index=True)
     user_id: Mapped[int] = mapped_column(BigInteger, index=True)
     name: Mapped[str] = mapped_column(String(32), index=True)
     # Подробность шага: уровень разбора, ключ расклада — что уместно
@@ -164,9 +165,14 @@ class DailyCard(Base):
     """
 
     __tablename__ = "daily_cards"
-    __table_args__ = (UniqueConstraint("user_id", "day", name="uq_daily_card_user_day"),)
+    # Карта дня у каждого бренда своя: один и тот же человек получает её
+    # в каждом боте, на который подписан
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "user_id", "day", name="uq_daily_card_user_day"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, default=1, index=True)
     user_id: Mapped[int] = mapped_column(BigInteger, index=True)
     day: Mapped[date] = mapped_column(Date, index=True)
     card_id: Mapped[str] = mapped_column(String(32))
@@ -187,7 +193,8 @@ class Payment(Base):
     __tablename__ = "payments"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, default=1, index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
     amount: Mapped[int] = mapped_column(Integer)
     currency: Mapped[str] = mapped_column(String(8), default="RUB")
     charge_id: Mapped[str | None] = mapped_column(String(128), unique=True)

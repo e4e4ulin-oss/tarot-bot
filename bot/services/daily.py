@@ -61,11 +61,14 @@ class DailyCards:
         settings: Settings,
         session_factory,
         *,
+        tenant_id: int = 1,
         interval: float = 60.0,
     ) -> None:
         self.bot = bot
         self.settings = settings
         self.session_factory = session_factory
+        # Рассылка идёт подписчикам своего бренда, а не всем подряд
+        self.tenant_id = tenant_id
         self.interval = interval
 
     async def run(self) -> None:
@@ -87,7 +90,7 @@ class DailyCards:
 
     async def send_due(self, day: date) -> int:
         async with self.session_factory() as session:
-            repo = Repo(session)
+            repo = Repo(session, self.tenant_id)
             waiting = await repo.daily_subscribers_pending(day, self.settings.daily_card_batch)
             sent = 0
             for user_id in waiting:
