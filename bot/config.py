@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     author_price_full: int = Field(default=1000, alias="AUTHOR_PRICE_FULL")
     author_currency: str = Field(default="₽", alias="AUTHOR_CURRENCY")
 
+    # --- Мини-приложение ---
+    # Адрес опубликованной колоды. Пусто — команда /deck отвечает, что её нет.
+    miniapp_url: str = Field(default="", alias="MINIAPP_URL")
+
     # --- Языковая модель ---
     # Любой OpenAI-совместимый провайдер: xAI, Groq, Google Gemini, OpenRouter, Cerebras.
     # Имена XAI_*/GROK_* оставлены ради совместимости с уже настроенными сервисами.

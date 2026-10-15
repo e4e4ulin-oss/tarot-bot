@@ -26,6 +26,7 @@ def test_router_order_keeps_fallback_last():
         "daily",
         "auto",
         "author",
+        "miniapp",
         "fallback",
     ]
 
@@ -86,3 +87,11 @@ def test_author_name_fits_any_value():
             )
             assert f"от {name}" not in rendered, (name, rendered[:60])
             assert f"у {name}" not in rendered, (name, rendered[:60])
+
+
+def test_deck_button_needs_an_address():
+    from bot.handlers.miniapp import deck_button
+
+    markup = deck_button("https://taro.example.com")
+    button = markup.inline_keyboard[0][0]
+    assert button.web_app.url == "https://taro.example.com"
