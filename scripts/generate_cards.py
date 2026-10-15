@@ -40,7 +40,7 @@ REFERENCES = {
     "fool": "magician-crimson.jpg",
     "major1": "magician-crimson.jpg",
     "major2": "justice-indigo.jpg",
-    "major3": "justice-indigo.jpg",
+    "major3": "devil-charcoal.jpg",
 }
 
 COMMON = """\
