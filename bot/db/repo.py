@@ -49,7 +49,12 @@ class Repo:
         return int(result.scalar_one())
 
     async def add_payment(
-        self, user_id: int, amount: int, currency: str, charge_id: str | None
+        self,
+        user_id: int,
+        amount: int,
+        currency: str,
+        charge_id: str | None,
+        kind: str = "auto_reading",
     ) -> Payment:
         payment = Payment(
             tenant_id=self.tenant_id,
@@ -57,17 +62,19 @@ class Repo:
             amount=amount,
             currency=currency,
             charge_id=charge_id,
+            kind=kind,
         )
         self.session.add(payment)
         await self.session.commit()
         return payment
 
-    async def unspent_payment(self, user_id: int) -> Payment | None:
+    async def unspent_payment(self, user_id: int, kind: str = "auto_reading") -> Payment | None:
         result = await self.session.execute(
             select(Payment)
             .where(
                 Payment.tenant_id == self.tenant_id,
                 Payment.user_id == user_id,
+                Payment.kind == kind,
                 Payment.spent_at.is_(None),
             )
             .order_by(Payment.created_at)
@@ -175,6 +182,19 @@ class Repo:
         reading = await self.session.get(Reading, reading_id)
         # Чужой расклад по угаданному номеру отдавать нельзя
         return reading if reading and reading.tenant_id == self.tenant_id else None
+
+    async def last_natal(self, user_id: int) -> Reading | None:
+        """Написанный когда-то разбор карты: карта не меняется, и он тоже."""
+        return await self.session.scalar(
+            select(Reading)
+            .where(
+                Reading.tenant_id == self.tenant_id,
+                Reading.user_id == user_id,
+                Reading.mode == ReadingMode.NATAL,
+            )
+            .order_by(Reading.created_at.desc())
+            .limit(1)
+        )
 
     # --- Кэш картинок карт ----------------------------------------------
     async def card_file_ids(self, card_ids: list[str]) -> dict[str, str]:

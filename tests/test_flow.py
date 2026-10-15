@@ -1120,3 +1120,74 @@ async def test_the_forecast_shows_the_calculation_even_without_a_model(env):
     body = "\n".join(session.texts())
 
     assert "транзит" in body.lower() or "тихо" in body.lower() or "нет" in body.lower()
+
+
+async def fill_birth_data(factory, chat: int) -> None:
+    async with factory() as db:
+        repo = Repo(db)
+        await repo.upsert_user(chat, None, "Клиент")
+        await repo.save_profile(
+            chat,
+            birth_date=date(1987, 1, 1),
+            birth_time="03:40",
+            birth_city="Москва",
+            birth_lat=55.75204,
+            birth_lon=37.61781,
+            birth_tz="Europe/Moscow",
+        )
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_the_deep_reading_needs_time_and_city(env):
+    dp, bot, session, factory = env
+    chat = 1051
+
+    async with factory() as db:
+        repo = Repo(db)
+        await repo.upsert_user(chat, None, "Клиент")
+        await repo.save_profile(chat, birth_date=date(1987, 1, 1))
+
+    session.clear()
+    await feed(dp, bot, make_callback("natal:offer", chat_id=chat), 1)
+    assert any("время и город" in text for text in session.texts()), session.texts()
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_the_deep_reading_is_offered_for_money(env):
+    dp, bot, session, factory = env
+    chat = 1052
+    await fill_birth_data(factory, chat)
+
+    session.clear()
+    await feed(dp, bot, make_callback("natal:offer", chat_id=chat), 1)
+    body = "\n".join(session.texts())
+    assert "990" in body
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_without_payment_the_text_is_not_written(env):
+    """Кнопка «написать» не должна обходить оплату."""
+    dp, bot, session, factory = env
+    chat = 1053
+    await fill_birth_data(factory, chat)
+
+    session.clear()
+    await feed(dp, bot, make_callback("natal:write", chat_id=chat), 1)
+
+    async with factory() as db:
+        assert await Repo(db).last_natal(chat) is None
+    assert any("990" in text for text in session.texts())
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_paying_for_a_reading_does_not_open_a_spread(env):
+    """Разбор карты и расклад — разные товары, и оплата одного не даёт другое."""
+    dp, bot, session, factory = env
+    chat = 1054
+    await fill_birth_data(factory, chat)
+
+    async with factory() as db:
+        repo = Repo(db)
+        await repo.add_payment(chat, 990, "RUB", "charge-natal", kind="natal_reading")
+        assert await repo.unspent_payment(chat, "auto_reading") is None
+        assert await repo.unspent_payment(chat, "natal_reading") is not None

@@ -158,8 +158,9 @@ def profile_menu() -> InlineKeyboardMarkup:
     builder.button(text="Где живу сейчас", callback_data="profile:city")
     builder.button(text="🪐 Натальная карта", callback_data="chart:show")
     builder.button(text="🔭 Прогноз", callback_data="chart:forecast")
+    builder.button(text="📖 Подробный разбор карты", callback_data="natal:offer")
     builder.button(text="‹ Меню", callback_data="menu:main")
-    builder.adjust(2, 2, 2, 1)
+    builder.adjust(2, 2, 2, 1, 1)
     return builder.as_markup()
 
 
@@ -178,5 +179,21 @@ def places_menu(places) -> InlineKeyboardMarkup:
     for place in places:
         builder.button(text=f"{place.name} · {place.hint}", callback_data=f"place:{place.geonameid}")
     builder.button(text="‹ Кабинет", callback_data="menu:profile")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def natal_menu(price: int, currency: str) -> InlineKeyboardMarkup:
+    """Предложение разбора: цена на кнопке, чтобы не искать её в тексте."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text=f"Заказать за {price} {currency}", callback_data="natal:buy")
+    builder.button(text="‹ Кабинет", callback_data="menu:profile")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def natal_ready_menu() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Написать разбор", callback_data="natal:write")
     builder.adjust(1)
     return builder.as_markup()

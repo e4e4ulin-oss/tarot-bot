@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     free_needs_daily: bool = Field(default=True, alias="FREE_NEEDS_DAILY")
     # Цена одного расклада после того, как бесплатные кончились
     auto_reading_price: int = Field(default=369, alias="AUTO_READING_PRICE")
+    # Подробный разбор натальной карты: пишется один раз и надолго,
+    # поэтому и стоит иначе, чем расклад
+    natal_reading_price: int = Field(default=990, alias="NATAL_READING_PRICE")
     # Токен платёжного провайдера от BotFather. Пусто — оплата не предлагается,
     # и бот честно говорит, что платные расклады пока не подключены.
     payment_provider_token: str = Field(default="", alias="PAYMENT_PROVIDER_TOKEN")
