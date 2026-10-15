@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
+from .tarot import life_card, year_card
+
 SKIP = {"не знаю", "незнаю", "не помню", "пропустить", "-", "—", "нет"}
 
 DATE_FORMATS = ("%d.%m.%Y", "%d.%m.%y", "%Y-%m-%d", "%d/%m/%Y")
@@ -54,10 +56,17 @@ def parse_city(text: str) -> str | None:
 
 
 def describe(user) -> str:
-    """Что бот знает о человеке — его же словами, без пустых строк."""
+    """Что бот знает о человеке — его же словами, без пустых строк.
+
+    Карты рождения и года считаются из даты и дописываются сюда же: это не
+    то, что человек рассказал, а то, что из рассказанного следует.
+    """
     lines = []
     if user is not None and user.birth_date:
         lines.append(f"Дата рождения: {user.birth_date.strftime('%d.%m.%Y')}")
+        year = date.today().year
+        lines.append(f"Карта рождения: {life_card(user.birth_date).name}")
+        lines.append(f"Карта {year} года: {year_card(user.birth_date, year).name}")
     if user is not None and user.birth_time:
         lines.append(f"Время рождения: {user.birth_time}")
     if user is not None and user.birth_city:
