@@ -68,6 +68,9 @@ COMMON = """\
 MAX_BACKGROUND_DELTA = 14.0
 MAX_TITLE_SPREAD = 12.0
 FIGURE_RANGE = (0.18, 0.34)
+# Ниже этого запаса по светлому фигура перестаёт лепиться светом и на доске
+# превращается в пятно. Перерисовку не требует — но знать об этом надо.
+MIN_FIGURE_RELIEF = 10.0
 
 
 @dataclass(frozen=True)
@@ -103,6 +106,10 @@ def inspect(path: Path, tone_hex: str) -> Check:
             figure_at = y / height
             break
 
+    lower = image.crop((0, int(height * 0.35), width, height)).resize((80, 80))
+    bright = sorted(sum(p) / 3 for p in lower.getdata())
+    relief = bright[int(len(bright) * 0.9)] - sum(corner[:3]) / 3
+
     problems = []
     if delta > MAX_BACKGROUND_DELTA:
         problems.append(f"фон разошёлся на {delta:.1f}")
@@ -113,7 +120,9 @@ def inspect(path: Path, tone_hex: str) -> Check:
 
     report = (
         f"фон Δ{delta:4.1f} · поле {spread:4.1f} · фигура с {figure_at:.0%}"
+        f" · свет {relief:5.1f}"
         + (" — " + "; ".join(problems) if problems else "")
+        + ("" if relief >= MIN_FIGURE_RELIEF else " (внимание: мало света на фигуре)")
     )
     return Check(not problems, report)
 
