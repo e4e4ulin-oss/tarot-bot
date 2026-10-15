@@ -1011,3 +1011,19 @@ async def test_the_cabinet_remembers_what_was_told(env):
     assert user.birth_date.isoformat() == "1998-05-21"
     assert user.birth_time is None
     assert any("21.05.1998" in text for text in session.texts())
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_the_cabinet_says_whether_it_understood_the_city(env):
+    dp, bot, session, _ = env
+    chat = 1045
+
+    await feed(dp, bot, make_callback("profile:birth_city", chat_id=chat), 1)
+    session.clear()
+    await feed(dp, bot, make_message("г. Энгельс, Саратовской обл", chat_id=chat), 2)
+    assert any("Нашёл на карте" in text for text in session.texts()), session.texts()
+
+    await feed(dp, bot, make_callback("profile:birth_city", chat_id=chat), 3)
+    session.clear()
+    await feed(dp, bot, make_message("деревня Малые Выселки", chat_id=chat), 4)
+    assert any("не нашёл" in text for text in session.texts()), session.texts()

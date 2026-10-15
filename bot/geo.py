@@ -54,5 +54,34 @@ def _index() -> dict[str, Place]:
     return index
 
 
+# Люди пишут адрес, а не название: «г. Энгельс, Саратовской обл».
+# Отбрасываем то, что городом не является.
+PREFIXES = ("г.", "г", "гор.", "город", "пос.", "посёлок", "поселок", "с.", "село", "ст.")
+TAILS = ("область", "обл.", "обл", "район", "р-н", "край", "республика", "россия", "рф")
+
+
+def _candidates(name: str) -> list[str]:
+    """Что пробовать искать: от написанного целиком до одного слова."""
+    cleaned = name.replace("ё", "е")
+    seen: list[str] = []
+
+    for part in [cleaned, *cleaned.split(",")]:
+        words = part.strip().split()
+        while words and words[0].lower().strip(".") in {p.strip(".") for p in PREFIXES}:
+            words = words[1:]
+        while words and words[-1].lower().strip(".") in {t.strip(".") for t in TAILS}:
+            words = words[:-1]
+        if words:
+            guess = " ".join(words)
+            if guess not in seen:
+                seen.append(guess)
+    return seen
+
+
 def find(name: str) -> Place | None:
-    return _index().get(_normalize(name))
+    index = _index()
+    for guess in _candidates(name):
+        place = index.get(_normalize(guess))
+        if place is not None:
+            return place
+    return None

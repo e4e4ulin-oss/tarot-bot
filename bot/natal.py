@@ -49,6 +49,8 @@ class Chart:
             out.append(f"Луна: {self.moon}")
         if self.ascendant is not None:
             out.append(f"Асцендент: {self.ascendant}")
+        elif self.exact_time and self.place is None:
+            out.append("— асцендент не посчитан: город рождения не нашёлся на карте")
         return out
 
 
