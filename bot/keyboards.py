@@ -18,6 +18,7 @@ def main_menu(author_name: str) -> InlineKeyboardMarkup:
     builder.button(text="🔮 Авто-расклад", callback_data="menu:auto")
     builder.button(text="✍️ Авторский разбор", callback_data="menu:author")
     builder.button(text="📜 Мои расклады", callback_data="menu:history")
+    builder.button(text="👤 Личный кабинет", callback_data="menu:profile")
     builder.button(text="ℹ️ О раскладах", callback_data="menu:about")
     builder.adjust(1)
     return builder.as_markup()
@@ -144,5 +145,26 @@ def subscribe_menu() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="🔔 Подписаться на карту дня", callback_data="daily:on")
     builder.button(text="‹ Меню", callback_data="menu:main")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def profile_menu() -> InlineKeyboardMarkup:
+    """Личный кабинет: что человек рассказал о себе и что может дополнить."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Дата рождения", callback_data="profile:birth_date")
+    builder.button(text="Время рождения", callback_data="profile:birth_time")
+    builder.button(text="Город рождения", callback_data="profile:birth_city")
+    builder.button(text="Где живу сейчас", callback_data="profile:city")
+    builder.button(text="‹ Меню", callback_data="menu:main")
+    builder.adjust(2, 2, 1)
+    return builder.as_markup()
+
+
+def number_menu(spread_key: str) -> InlineKeyboardMarkup:
+    """Шаг с числом: человек называет своё или доверяет колоде."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Пусть выберет колода", callback_data=f"number:{spread_key}")
+    builder.button(text="‹ К раскладкам", callback_data="menu:auto")
     builder.adjust(1)
     return builder.as_markup()

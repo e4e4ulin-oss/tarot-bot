@@ -23,6 +23,10 @@ ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("orders", "tier", "VARCHAR(16)"),
     ("orders", "followups_used", "INTEGER DEFAULT 0 NOT NULL"),
     ("users", "daily_subscribed", "BOOLEAN DEFAULT 0 NOT NULL"),
+    ("users", "birth_date", "DATE"),
+    ("users", "birth_time", "VARCHAR(5)"),
+    ("users", "birth_city", "VARCHAR(64)"),
+    ("users", "city", "VARCHAR(64)"),
     # Арендатор: единица — бот, с которого всё начиналось
     ("readings", "tenant_id", "INTEGER DEFAULT 1 NOT NULL"),
     ("orders", "tenant_id", "INTEGER DEFAULT 1 NOT NULL"),

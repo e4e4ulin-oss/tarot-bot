@@ -196,6 +196,9 @@ async def test_auto_reading_end_to_end(env):
     await feed(dp, bot, make_callback("spread:ptf", chat_id=chat), 3)
     session.clear()
     await feed(dp, bot, make_message("Что мне мешает переехать?", chat_id=chat), 4)
+    assert any("число" in text.lower() for text in session.texts()), session.texts()
+    session.clear()
+    await feed(dp, bot, make_message("17", chat_id=chat), 5)
 
     sent = session.texts()
     assert any("Прошлое" in text for text in sent), sent
@@ -215,6 +218,7 @@ async def test_reading_without_question(env):
     chat = 1003
 
     await feed(dp, bot, make_callback("draw:day", chat_id=chat), 1)
+    await feed(dp, bot, make_message("17", chat_id=chat), 2)
 
     async with factory() as db:
         readings = await Repo(db).last_readings(chat)
@@ -243,6 +247,7 @@ async def test_daily_limit_blocks_extra_readings(env):
 
     session.clear()
     await feed(dp, bot, make_callback("draw:day", chat_id=chat), 1)
+    await feed(dp, bot, make_message("17", chat_id=chat), 2)
     assert any("лимит" in text for text in session.texts())
 
     async with factory() as db:
@@ -371,6 +376,7 @@ async def test_reading_sends_card_images_and_caches_file_ids(env):
     chat = 1008
 
     await feed(dp, bot, make_callback("draw:day", chat_id=chat), 1)
+    await feed(dp, bot, make_message("17", chat_id=chat), 2)
 
     albums = session.methods("SendMediaGroup")
     assert albums, session.calls
@@ -940,3 +946,68 @@ async def test_unrotatable_card_falls_back_without_poisoning_the_cache(env, monk
     async with factory() as db:
         cached = await Repo(db).card_file_ids([cache_key(card, True)])
     assert cached == {}
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_the_same_number_in_the_same_minute_gives_the_same_cards(env):
+    """Число — это снятие колоды: расклад становится собственным, а не чужим."""
+    from datetime import datetime
+
+    from bot.tarot import SPREADS, draw_spread, rng_for
+
+    moment = datetime(2026, 10, 15, 21, 0)
+    names = lambda drawn: [item.card.id for item in drawn]  # noqa: E731
+
+    mine = names(draw_spread(SPREADS["ptf"], rng=rng_for(1, 17, moment, "переезд")))
+    again = names(draw_spread(SPREADS["ptf"], rng=rng_for(1, 17, moment, "переезд")))
+    other_number = names(draw_spread(SPREADS["ptf"], rng=rng_for(1, 18, moment, "переезд")))
+    other_person = names(draw_spread(SPREADS["ptf"], rng=rng_for(2, 17, moment, "переезд")))
+
+    assert mine == again
+    assert mine != other_number
+    assert mine != other_person
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_nonsense_instead_of_a_number_is_asked_again(env):
+    dp, bot, session, _ = env
+    chat = 1042
+
+    await feed(dp, bot, make_callback("draw:day", chat_id=chat), 1)
+    session.clear()
+    await feed(dp, bot, make_message("как-нибудь", chat_id=chat), 2)
+    assert any("число от 1 до 99" in text for text in session.texts()), session.texts()
+
+    await feed(dp, bot, make_message("0", chat_id=chat), 3)
+    assert any("число от 1 до 99" in text for text in session.texts())
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_the_deck_can_pick_the_number_itself(env):
+    dp, bot, session, factory = env
+    chat = 1043
+
+    await feed(dp, bot, make_callback("draw:day", chat_id=chat), 1)
+    await feed(dp, bot, make_callback("number:day", chat_id=chat), 2)
+
+    async with factory() as db:
+        assert len(await Repo(db).last_readings(chat)) == 1
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_the_cabinet_remembers_what_was_told(env):
+    dp, bot, session, factory = env
+    chat = 1044
+
+    await feed(dp, bot, make_callback("menu:profile", chat_id=chat), 1)
+    await feed(dp, bot, make_callback("profile:birth_date", chat_id=chat), 2)
+    await feed(dp, bot, make_message("21.05.1998", chat_id=chat), 3)
+    await feed(dp, bot, make_callback("profile:birth_time", chat_id=chat), 4)
+    await feed(dp, bot, make_message("не знаю", chat_id=chat), 5)
+
+    async with factory() as db:
+        user = await Repo(db).get_user(chat)
+
+    assert user.birth_date.isoformat() == "1998-05-21"
+    assert user.birth_time is None
+    assert any("21.05.1998" in text for text in session.texts())

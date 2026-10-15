@@ -108,6 +108,18 @@ class Repo:
     async def get_user(self, user_id: int) -> User | None:
         return await self.session.get(User, (self.tenant_id, user_id))
 
+    async def save_profile(self, user_id: int, **fields: object) -> User:
+        """Записывает то, что человек рассказал о себе. Пустое не затирает."""
+        user = await self.session.get(User, (self.tenant_id, user_id))
+        if user is None:
+            user = User(tenant_id=self.tenant_id, id=user_id)
+            self.session.add(user)
+        for name, value in fields.items():
+            if value is not None:
+                setattr(user, name, value)
+        await self.session.commit()
+        return user
+
     # --- Расклады -------------------------------------------------------
     async def save_reading(
         self,
