@@ -14,7 +14,9 @@ WorkingDirectory=/opt/tarot-bot
 EnvironmentFile=/opt/tarot-bot/.env
 ExecStart=/opt/tarot-bot/.venv/bin/python -m bot
 Restart=always
-RestartSec=5
+# Полминуты между попытками: бот перезапускается, пока не поднимется, и
+# секундный шаг означал бы сотню заходов в базу и в Telegram ни за чем
+RestartSec=30
 
 [Install]
 WantedBy=multi-user.target
