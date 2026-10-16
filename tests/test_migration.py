@@ -176,3 +176,106 @@ async def test_interrupted_rebuild_is_finished_on_the_next_start(tmp_path: Path)
     assert user is not None and user.first_name == "Потеряшка"
 
     await engine.dispose()
+
+
+# Так таблица арендаторов выглядела, когда платным был только авторский разбор:
+# ни цены натального разбора, ни ссылки на мини-приложение в ней ещё нет
+TENANTS_BEFORE_NATAL = (
+    "CREATE TABLE tenants (id INTEGER PRIMARY KEY, slug VARCHAR(32) UNIQUE, "
+    "title VARCHAR(128), bot_token VARCHAR(64) UNIQUE, bot_id BIGINT UNIQUE, "
+    "admin_chat_id BIGINT DEFAULT 0 NOT NULL, admin_ids JSON, "
+    "author_name VARCHAR(64), currency VARCHAR(8), price_short INTEGER, "
+    "price_base INTEGER, price_full INTEGER, free_auto_readings INTEGER, "
+    "free_needs_daily BOOLEAN, auto_reading_price INTEGER, "
+    "active BOOLEAN DEFAULT 1 NOT NULL, created_at DATETIME)"
+)
+
+
+@pytest.mark.asyncio
+async def test_a_column_forgotten_in_the_list_is_added_from_the_model(tmp_path: Path):
+    """Цена натального разбора появилась в модели позже самой таблицы.
+
+    Такую колонку никто не вписал в список вручную — и бот на сервере падал
+    на первом же запросе к арендатору. Схема обязана дотягиваться до модели
+    сама, иначе каждое новое поле — это новое падение.
+    """
+    engine = create_engine(f"sqlite+aiosqlite:///{tmp_path / 'tenants.db'}")
+    async with engine.begin() as conn:
+        await conn.execute(text(TENANTS_BEFORE_NATAL))
+        await conn.execute(
+            text(
+                "INSERT INTO tenants (id, slug, title, bot_token, bot_id, admin_ids, "
+                "author_name, currency, price_short, price_base, price_full, "
+                "free_auto_readings, free_needs_daily, auto_reading_price, created_at) "
+                "VALUES (1, 'origin', 'Свой бот', 'token-1', 8217320563, '[]', "
+                "'таролог', '₽', 500, 700, 1000, 3, 1, 369, '2026-01-01 00:00:00')"
+            )
+        )
+
+    await init_models(engine)
+
+    assert {"natal_reading_price", "miniapp_url", "payment_provider_token"} <= await columns(
+        engine, "tenants"
+    )
+
+    # Старый арендатор на месте, а новая цена взялась из значения по умолчанию
+    async with engine.begin() as conn:
+        kept = (
+            await conn.execute(
+                text("SELECT title, natal_reading_price, miniapp_url FROM tenants WHERE id = 1")
+            )
+        ).first()
+    assert kept == ("Свой бот", 990, "")
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_the_tenant_reads_back_through_the_model(tmp_path: Path):
+    """Проверка не колонки, а того самого запроса, который падал на сервере."""
+    from sqlalchemy import select
+
+    from bot.db.models import Tenant
+
+    engine = create_engine(f"sqlite+aiosqlite:///{tmp_path / 'tenants.db'}")
+    async with engine.begin() as conn:
+        await conn.execute(text(TENANTS_BEFORE_NATAL))
+
+    await init_models(engine)
+    factory = create_session_factory(engine)
+    async with factory() as session:
+        await session.execute(select(Tenant).limit(1))
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_the_model_pass_does_not_cancel_the_rebuild(tmp_path: Path):
+    """Колонка арендатора у людей входит в ключ, а ключ дописать нельзя.
+
+    Если дописать её обычным ALTER, пересборка решит, что всё уже сделано, и
+    первичный ключ останется старым. Такую таблицу второй проход не трогает.
+    """
+    engine = create_engine(f"sqlite+aiosqlite:///{tmp_path / 'keys.db'}")
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "CREATE TABLE users (id INTEGER PRIMARY KEY, username VARCHAR(64), "
+                "first_name VARCHAR(128), created_at DATETIME)"
+            )
+        )
+        await conn.execute(
+            text(
+                "INSERT INTO users (id, first_name, created_at) "
+                "VALUES (9, 'Клиент', '2026-01-01')"
+            )
+        )
+
+    await init_models(engine)
+
+    async with engine.begin() as conn:
+        rows = (await conn.execute(text("PRAGMA table_info(users)"))).all()
+    # Ключ собран из двух колонок: арендатор и человек
+    assert {row[1] for row in rows if row[5]} == {"tenant_id", "id"}
+
+    await engine.dispose()

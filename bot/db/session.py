@@ -17,8 +17,9 @@ from .models import Base
 
 logger = logging.getLogger(__name__)
 
-# Колонки, добавленные к уже существующим таблицам. create_all() обходит таблицу,
-# если она есть, поэтому у работающего бота новые поля надо дописывать самим.
+# Колонки, для которых значение старых строк названо вручную. Остальное
+# дописывается по самой модели (_add_from_model): перечислять каждое новое поле
+# здесь означало бы ломать работающего бота всякий раз, когда о нём забыли.
 ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("orders", "tier", "VARCHAR(16)"),
     ("orders", "followups_used", "INTEGER DEFAULT 0 NOT NULL"),
@@ -62,6 +63,20 @@ def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSessi
     return async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
+# Чем заполнить обязательную колонку, которой в старой таблице не было.
+# Схема росла постепенно, и строка пятилетней давности может не знать о поле,
+# появившемся позже; без подстановки и ALTER, и перелив упали бы на NOT NULL.
+FILLERS: dict[str, str] = {
+    "DATETIME": "CURRENT_TIMESTAMP",
+    "DATE": "CURRENT_DATE",
+    "INTEGER": "0",
+    "BIGINT": "0",
+    "FLOAT": "0",
+    "BOOLEAN": "0",
+    "JSON": "'[]'",
+}
+
+
 def _add_missing_columns(conn) -> None:
     inspector = inspect(conn)
     tables = set(inspector.get_table_names())
@@ -72,6 +87,76 @@ def _add_missing_columns(conn) -> None:
             continue
         logger.info("Добавляю колонку %s.%s", table, column)
         conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}"))
+
+
+# То же для ALTER TABLE, но только постоянными значениями: SQLite не во всех
+# версиях принимает CURRENT_TIMESTAMP в добавляемой колонке. У даты рождения
+# строки и у времени создания постоянной подстановки нет — и выдумывать её
+# нечестно: такая колонка добавляется необязательной, и у старых строк пусто.
+CONSTANTS: dict[str, str] = {
+    kind: value for kind, value in FILLERS.items() if not value.startswith("CURRENT_")
+}
+
+
+def _literal(value: object) -> str:
+    """Значение из модели в виде, пригодном для SQL."""
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    if isinstance(value, int | float):
+        return str(value)
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def _column_ddl(column, dialect) -> str:
+    """Описание колонки для ALTER TABLE: тип, обязательность и чем заполнить.
+
+    SQLite не добавит обязательную колонку без значения по умолчанию: он не
+    знает, что писать в уже существующие строки. Берём то, что названо в
+    модели, иначе — пустое значение по типу.
+    """
+    kind = column.type.compile(dialect)
+    if column.nullable:
+        return kind
+
+    default = column.default
+    filler = (
+        _literal(default.arg)
+        if default is not None and getattr(default, "is_scalar", False)
+        else CONSTANTS.get(kind.split("(")[0].upper())
+    )
+    if filler is None:
+        # Бот, который не поднимается, хуже колонки, где у старых строк пусто
+        logger.warning("Колонку %s заполнить нечем — добавляю необязательной", column.name)
+        return kind
+    return f"{kind} DEFAULT {filler} NOT NULL"
+
+
+def _add_from_model(conn) -> None:
+    """Дописывает всё, что есть в модели и чего нет в таблице.
+
+    Это второй проход, и он важнее первого: без него каждое новое поле молча
+    ломает работающего бота, и узнаётся это трейсом с сервера.
+    """
+    inspector = inspect(conn)
+    tables = set(inspector.get_table_names())
+    for name, model in Base.metadata.tables.items():
+        if name not in tables:
+            continue  # create_all создаст её целиком
+        existing = {column["name"] for column in inspector.get_columns(name)}
+        if name in REBUILT_FOR_TENANT and "tenant_id" not in existing:
+            # Такую таблицу сейчас пересоберут целиком, и колонка арендатора
+            # должна войти в ключ. Добавить её здесь — значит отменить пересборку
+            continue
+        for column in model.columns:
+            if column.name in existing:
+                continue
+            logger.info("Добавляю колонку %s.%s по модели", name, column.name)
+            conn.execute(
+                text(
+                    f"ALTER TABLE {name} ADD COLUMN {column.name} "
+                    f"{_column_ddl(column, conn.dialect)}"
+                )
+            )
 
 
 def _park_tables_without_tenant_key(conn) -> list[str]:
@@ -97,12 +182,6 @@ def _park_tables_without_tenant_key(conn) -> list[str]:
         conn.execute(text(f"ALTER TABLE {table} RENAME TO {table}_pre_tenant"))
         parked.append(table)
     return parked
-
-
-# Чем заполнить обязательную колонку, которой в старой таблице не было.
-# Схема росла постепенно, и строка пятилетней давности может не знать о поле,
-# появившемся позже; без подстановки перелив упал бы на NOT NULL.
-FILLERS: dict[str, str] = {"DATETIME": "CURRENT_TIMESTAMP", "INTEGER": "0", "BOOLEAN": "0"}
 
 
 def _refill_rebuilt_tables(conn, parked: list[str]) -> None:
@@ -145,6 +224,7 @@ async def init_models(engine: AsyncEngine) -> None:
 async def _upgrade(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
         await conn.run_sync(_add_missing_columns)
+        await conn.run_sync(_add_from_model)
         parked = await conn.run_sync(_park_tables_without_tenant_key)
         await conn.run_sync(Base.metadata.create_all)
         if parked:
