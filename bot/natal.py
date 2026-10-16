@@ -115,6 +115,7 @@ class Full:
     midheaven: astro.Position | None = None
     place: Place | None = None
     exact_time: bool = False
+    moment: datetime | None = None  # нужен узлам и фазе Луны
 
     @property
     def has_houses(self) -> bool:
@@ -125,7 +126,34 @@ class Full:
             return None
         return astro.house_of(planet.position, self.ascendant)
 
-    def lines(self, aspects_limit: int = 8) -> list[str]:
+    @property
+    def node(self) -> astro.Position | None:
+        """Северный узел Луны: сторона, в которую карта растёт."""
+        return astro.north_node(self.moment) if self.moment is not None else None
+
+    @property
+    def phase(self) -> str | None:
+        return astro.moon_phase(self.moment) if self.moment is not None else None
+
+    def rulers(self) -> list[astro.Ruler]:
+        if self.ascendant is None:
+            return []
+        return astro.rulers(self.ascendant, self.planets)
+
+    def nodes_line(self) -> str:
+        """Ось узлов одной строкой: южный узел — это северный напротив."""
+        north = self.node
+        assert north is not None
+        south = astro.Position((north.degrees + 180) % 360)
+        line = f"Узлы: северный {north} — южный {south}"
+        if self.ascendant is not None:
+            line += (
+                f" ({astro.house_of(north, self.ascendant)}"
+                f" и {astro.house_of(south, self.ascendant)} дома)"
+            )
+        return line
+
+    def lines(self, aspects_limit: int = 8, deep: bool = False) -> list[str]:
         out: list[str] = []
         if self.ascendant is not None and self.midheaven is not None:
             out.append(f"Асцендент: {self.ascendant}   Середина неба: {self.midheaven}")
@@ -137,10 +165,24 @@ class Full:
             mark = " R" if planet.retrograde else ""
             out.append(f"{planet.name}: {planet.position}{mark}{tail}")
 
+        out.append("")
+        elements, modes = astro.balance(self.planets)
+        out.append("Стихии: " + ", ".join(f"{name} {count}" for name, count in elements.items()))
+        out.append("Кресты: " + ", ".join(f"{name} {count}" for name, count in modes.items()))
+        if self.phase is not None:
+            out.append(f"Фаза Луны при рождении: {self.phase}")
+        if self.node is not None:
+            out.append(self.nodes_line())
+
         if self.aspects:
             out.append("")
             out.append("Аспекты:")
             out.extend(f"{aspect}" for aspect in self.aspects[:aspects_limit])
+
+        if deep and self.ascendant is not None:
+            out.append("")
+            out.append("Управители домов:")
+            out.extend(f"{ruler}" for ruler in self.rulers())
 
         if not self.exact_time:
             out.append("")
@@ -167,15 +209,28 @@ def full(
     links = astro.aspects(bodies)
 
     if not exact or place is None:
-        return Full(planets=bodies, aspects=links, place=place, exact_time=exact)
+        return Full(
+            planets=bodies, aspects=links, place=place, exact_time=exact, moment=moment
+        )
+
+    rising = astro.ascendant(moment, place.latitude, place.longitude)
+    upper = astro.midheaven(moment, place.longitude)
+
+    # Аспекты к углам идут в общий список и сортируются вместе с остальными:
+    # точное соединение с асцендентом важнее широкого тригона между планетами
+    links = sorted(
+        links + astro.angle_aspects(bodies, rising, upper),
+        key=lambda aspect: aspect.exact,
+    )
 
     return Full(
         planets=bodies,
         aspects=links,
-        ascendant=astro.ascendant(moment, place.latitude, place.longitude),
-        midheaven=astro.midheaven(moment, place.longitude),
+        ascendant=rising,
+        midheaven=upper,
         place=place,
         exact_time=True,
+        moment=moment,
     )
 
 

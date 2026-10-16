@@ -124,7 +124,7 @@ async def write(
     try:
         async with ChatActionSender.typing(bot=message.bot, chat_id=message.chat.id):
             result = await interpreter.natal(
-                "\n".join(card.lines(aspects_limit=20)), describe(user)
+                "\n".join(card.lines(aspects_limit=20, deep=True)), describe(user)
             )
     except (GrokError, TimeoutError):
         logger.warning("Разбор карты не написан: модель не ответила")
