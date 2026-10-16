@@ -52,12 +52,30 @@ def ground_mask(image: Image.Image) -> Image.Image:
     return mask.filter(ImageFilter.GaussianBlur(1.4))
 
 
+def ground_level(grey: Image.Image, mask: Image.Image) -> float:
+    """Яркость фона по медиане, а не по средней.
+
+    На семёрке Кубков фон занимают светящиеся облака и вспышка; средняя по ним
+    уезжает вверх, и фон красится темнее цели — на первом заходе вышло Δ19.9 при
+    пределе 14. Медиана держится на самом поле и яркими вкраплениями не двигается.
+    """
+    solid = mask.point(lambda v: 255 if v > 200 else 0)
+    counts = grey.histogram(solid)
+    half = sum(counts) / 2
+    seen = 0
+    for value, count in enumerate(counts):
+        seen += count
+        if seen >= half:
+            return max(1.0, float(value))
+    return 1.0
+
+
 def recolour(image: Image.Image, target: tuple[int, int, int]) -> Image.Image:
     """Фон в заданный цвет с сохранением фактуры и виньетки."""
     mask = ground_mask(image)
     grey = image.convert("L")
 
-    mean = max(1.0, ImageStat.Stat(grey, mask).mean[0])
+    mean = ground_level(grey, mask)
     painted = Image.merge(
         "RGB",
         [
