@@ -182,22 +182,34 @@ def house_of(position: Position, ascendant: Position) -> int:
     return int(((position.degrees - ascendant.degrees) % 360) // SIGN) + 1
 
 
+def _aspect_between(
+    first: float, second: float, *, wider: bool = False
+) -> tuple[str, float] | None:
+    """Какой угол стоит между двумя точками карты и насколько он точен.
+
+    Допуск шире там, где участвует главное — светила и углы карты. Это не
+    поблажка, а порядок чтения: их связи замечают первыми.
+    """
+    gap = abs(first - second) % 360
+    gap = min(gap, 360 - gap)
+    for kind, angle, orb in ASPECTS:
+        if abs(gap - angle) <= orb + (WIDER if wider else 0):
+            return kind, abs(gap - angle)
+    return None
+
+
 def aspects(bodies: list[Planet]) -> list[Aspect]:
     """Значимые углы между планетами, от точных к широким."""
     found = []
     for index, first in enumerate(bodies):
         for second in bodies[index + 1 :]:
-            gap = abs(first.position.degrees - second.position.degrees) % 360
-            gap = min(gap, 360 - gap)
-            for kind, angle, orb in ASPECTS:
-                allowed = orb + (
-                    WIDER if first.name in LUMINARIES or second.name in LUMINARIES else 0
-                )
-                if abs(gap - angle) <= allowed:
-                    found.append(
-                        Aspect(first.name, second.name, kind, abs(gap - angle))
-                    )
-                    break
+            hit = _aspect_between(
+                first.position.degrees,
+                second.position.degrees,
+                wider=first.name in LUMINARIES or second.name in LUMINARIES,
+            )
+            if hit is not None:
+                found.append(Aspect(first.name, second.name, *hit))
     return sorted(found, key=lambda aspect: aspect.exact)
 
 
@@ -347,3 +359,159 @@ def timing(
         leaves = days[last] if last < len(days) - 1 else None
 
     return Timing(exact=exact, entered=entered, leaves=leaves)
+
+
+# Управители знаков. Берутся современные; у трёх знаков в скобках оставлен
+# старый управитель — традиция им пользуется до сих пор, и в разборе это
+# иногда заметно.
+RULERS: dict[str, str] = {
+    "Овен": "Марс",
+    "Телец": "Венера",
+    "Близнецы": "Меркурий",
+    "Рак": "Луна",
+    "Лев": "Солнце",
+    "Дева": "Меркурий",
+    "Весы": "Венера",
+    "Скорпион": "Плутон",
+    "Стрелец": "Юпитер",
+    "Козерог": "Сатурн",
+    "Водолей": "Уран",
+    "Рыбы": "Нептун",
+}
+
+OLD_RULERS: dict[str, str] = {"Скорпион": "Марс", "Водолей": "Сатурн", "Рыбы": "Юпитер"}
+
+ELEMENTS: tuple[str, ...] = ("огонь", "земля", "воздух", "вода")
+MODES: tuple[str, ...] = ("кардинальный", "фиксированный", "мутабельный")
+
+# Фазы Луны по расстоянию от Солнца: восемь делений круга
+PHASES: tuple[str, ...] = (
+    "новолуние",
+    "молодая луна",
+    "первая четверть",
+    "прибывающая луна",
+    "полнолуние",
+    "убывающая луна",
+    "последняя четверть",
+    "старая луна",
+)
+
+
+def element_of(sign: str) -> str:
+    return ELEMENTS[SIGNS.index(sign) % 4]
+
+
+def mode_of(sign: str) -> str:
+    return MODES[SIGNS.index(sign) % 3]
+
+
+def balance(bodies: list[Planet]) -> tuple[dict[str, int], dict[str, int]]:
+    """Сколько в карте каждой стихии и каждого креста.
+
+    Перекос виден сразу и объясняет человека быстрее, чем три абзаца о
+    планетах: «земли много, воздуха нет» — это уже характер.
+    """
+    elements = dict.fromkeys(ELEMENTS, 0)
+    modes = dict.fromkeys(MODES, 0)
+    for planet in bodies:
+        elements[element_of(planet.position.sign)] += 1
+        modes[mode_of(planet.position.sign)] += 1
+    return elements, modes
+
+
+def moon_phase(moment: datetime) -> str:
+    """Фаза Луны при рождении — по углу между Луной и Солнцем."""
+    gap = (moon(moment).degrees - sun(moment).degrees) % 360
+    return PHASES[int((gap + 22.5) % 360 // 45)]
+
+
+def north_node(moment: datetime) -> Position:
+    """Средний восходящий узел Луны.
+
+    Узел — не тело, а точка пересечения орбит, и эфемерид для него нет.
+    Считается формулой среднего движения: узел идёт назад, полный круг за
+    восемнадцать с половиной лет.
+    """
+    julian = ephem.Date(moment) + 2415020.0  # ephem считает дни от 1899 года
+    century = (julian - 2451545.0) / 36525.0
+    degrees = (
+        125.04452
+        - 1934.136261 * century
+        + 0.0020708 * century**2
+        + century**3 / 450000.0
+    )
+    return Position(degrees % 360)
+
+
+# Углы карты — не планеты, а направления: асцендент это то, каким человека
+# видят, середина неба — куда он идёт
+ANGLES: tuple[str, str] = ("Асцендент", "Середина неба")
+
+
+def angle_aspects(
+    bodies: list[Planet], ascendant: Position | None, midheaven: Position | None
+) -> list[Aspect]:
+    """Аспекты планет к углам карты.
+
+    Планета на углу видна в человеке сразу, без расспросов, поэтому допуск
+    здесь такой же широкий, как у светил.
+    """
+    found = []
+    for name, point in zip(ANGLES, (ascendant, midheaven), strict=True):
+        if point is None:
+            continue
+        for planet in bodies:
+            hit = _aspect_between(planet.position.degrees, point.degrees, wider=True)
+            if hit is not None:
+                found.append(Aspect(planet.name, name, *hit))
+    return sorted(found, key=lambda aspect: aspect.exact)
+
+
+def cusp(house: int, ascendant: Position) -> Position:
+    """Начало дома в равнодомной системе: от асцендента по тридцать градусов."""
+    return Position((ascendant.degrees + SIGN * (house - 1)) % 360)
+
+
+@dataclass(frozen=True)
+class Ruler:
+    house: int
+    sign: str  # знак на начале дома
+    planet: str  # его управитель
+    position: Position | None = None  # где стоит сам управитель
+    where: int | None = None  # и в каком он доме
+    old: str | None = None  # старый управитель знака, если он другой
+
+    def __str__(self) -> str:
+        line = f"{self.house} дом ({self.sign}) — {self.planet}"
+        if self.position is not None:
+            line += f": {self.position}"
+        if self.where:
+            line += f", {self.where} дом"
+        if self.old:
+            line += f"; старый управитель — {self.old}"
+        return line
+
+
+def rulers(ascendant: Position, bodies: list[Planet]) -> list[Ruler]:
+    """Хозяева домов и то, где они сами стоят.
+
+    Дом говорит о теме, управитель — о том, чем эта тема живёт: куда уходят
+    силы дома и откуда приходят. Без этого шага дома остаются списком тем,
+    между которыми нет связи.
+    """
+    found = {planet.name: planet for planet in bodies}
+    out = []
+    for house in range(1, 13):
+        sign = cusp(house, ascendant).sign
+        planet = found.get(RULERS[sign])
+        out.append(
+            Ruler(
+                house=house,
+                sign=sign,
+                planet=RULERS[sign],
+                position=planet.position if planet else None,
+                where=house_of(planet.position, ascendant) if planet else None,
+                old=OLD_RULERS.get(sign),
+            )
+        )
+    return out

@@ -161,3 +161,95 @@ def test_a_near_miss_is_not_reported_as_exact():
     pluto = [t for t in forecast(card, now) if t.moving == "Плутон"]
     if pluto:  # транзит привязан к дате: если его нет, проверять нечего
         assert "не станет" in timeline(pluto[0], card, now)
+
+
+def test_the_moon_phase_matches_the_eclipses_of_january_2000():
+    """6 января 2000 — солнечное затмение, 21 января — лунное.
+
+    Затмение бывает только в новолуние или в полнолуние, так что это
+    независимая проверка: фаза обязана совпасть.
+    """
+    from bot.astro import moon_phase
+
+    assert moon_phase(datetime(2000, 1, 6, 18, 14)) == "новолуние"
+    assert moon_phase(datetime(2000, 1, 21, 4, 40)) == "полнолуние"
+
+
+def test_the_moon_passes_every_phase_within_a_month():
+    from bot.astro import PHASES, moon_phase
+
+    start = datetime(2026, 3, 1, 12, 0)
+    seen = {moon_phase(start + timedelta(days=step)) for step in range(30)}
+    assert seen == set(PHASES)
+
+
+def test_the_lunar_eclipse_happens_at_the_node():
+    """Затмение возможно только у оси узлов — иначе тень проходит мимо.
+
+    Узел здесь средний, а затмение идёт по истинному: расхождение между
+    ними и даёт остаток в несколько градусов.
+    """
+    from bot.astro import moon, north_node
+
+    moment = datetime(2000, 1, 21, 4, 40)
+    gap = abs(moon(moment).degrees - north_node(moment).degrees) % 360
+    assert min(gap, abs(gap - 180), 360 - gap) < 6
+
+
+def test_the_node_goes_backwards_and_returns_in_eighteen_years():
+    from bot.astro import north_node
+
+    first = north_node(datetime(2000, 1, 1)).degrees
+    later = north_node(datetime(2001, 1, 1)).degrees
+    assert (first - later) % 360 < 30  # за год узел уходит назад на 19°
+
+    back = north_node(datetime(2018, 8, 1)).degrees  # круг за 18.6 года
+    assert min((first - back) % 360, (back - first) % 360) < 2
+
+
+def test_elements_and_crosses_are_counted_over_all_the_planets():
+    from bot.astro import Planet, Position, balance
+
+    bodies = [Planet("Солнце", Position(0)), Planet("Луна", Position(35))]  # Овен, Телец
+    elements, modes = balance(bodies)
+    assert elements == {"огонь": 1, "земля": 1, "воздух": 0, "вода": 0}
+    assert modes == {"кардинальный": 1, "фиксированный": 1, "мутабельный": 0}
+    assert sum(elements.values()) == sum(modes.values()) == len(bodies)
+
+
+def test_a_planet_on_the_angle_is_aspected_to_it():
+    from bot.astro import Planet, Position, angle_aspects
+
+    found = angle_aspects(
+        [Planet("Плутон", Position(101.0)), Planet("Марс", Position(220.0))],
+        Position(100.0),  # асцендент
+        Position(10.0),  # середина неба
+    )
+
+    # Точный тригон впереди соединения в градусе: список идёт от точных
+    assert (found[0].first, found[0].second, found[0].kind) == ("Марс", "Асцендент", "тригон")
+    assert {(a.first, a.second, a.kind) for a in found} == {
+        ("Марс", "Асцендент", "тригон"),
+        ("Плутон", "Асцендент", "соединение"),
+        ("Плутон", "Середина неба", "квадрат"),
+    }
+
+
+def test_an_angle_without_houses_gives_no_aspects():
+    from bot.astro import Planet, Position, angle_aspects
+
+    assert angle_aspects([Planet("Марс", Position(10))], None, None) == []
+
+
+def test_each_house_knows_its_ruler_and_where_it_stands():
+    from bot.astro import Planet, Position, rulers
+
+    asc = Position(217.0)  # Скорпион
+    found = rulers(asc, [Planet("Плутон", Position(220.0)), Planet("Венера", Position(250.0))])
+
+    assert len(found) == 12
+    first = found[0]
+    assert (first.sign, first.planet, first.old) == ("Скорпион", "Плутон", "Марс")
+    assert first.where == 1  # Плутон стоит в своём же первом доме
+    assert found[6].planet == "Венера" and found[6].where == 2
+    assert found[1].position is None  # Юпитера в списке нет — и выдумывать нечего
