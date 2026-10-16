@@ -223,7 +223,7 @@
     major: 'Старшие арканы', wands: 'Жезлы', cups: 'Кубки', swords: 'Мечи', pentacles: 'Пентакли',
   };
   // Нарисованные карты: лицо берётся из cards/, остальные показывают пустое поле
-  const PAINTED = new Set(["major_00", "major_01", "major_02", "major_03", "major_04", "major_05", "major_06", "major_07", "major_08", "major_09", "major_10", "major_11", "major_12", "major_13", "major_14", "major_15", "major_16", "major_17", "major_18", "major_19", "major_20", "major_21", "wands_01", "wands_02", "wands_03", "wands_04", "wands_05", "wands_06", "wands_07", "wands_08", "wands_09", "wands_10", "wands_11", "wands_12", "wands_13", "wands_14", "cups_02", "cups_03", "cups_04", "cups_05", "cups_06", "cups_07"]);
+  const PAINTED = new Set(["major_00", "major_01", "major_02", "major_03", "major_04", "major_05", "major_06", "major_07", "major_08", "major_09", "major_10", "major_11", "major_12", "major_13", "major_14", "major_15", "major_16", "major_17", "major_18", "major_19", "major_20", "major_21", "wands_01", "wands_02", "wands_03", "wands_04", "wands_05", "wands_06", "wands_07", "wands_08", "wands_09", "wands_10", "wands_11", "wands_12", "wands_13", "wands_14", "cups_02", "cups_03", "cups_04", "cups_05", "cups_06", "cups_07", "cups_08"]);
 
   function toneFor(card) {
     if (card.group !== 'major') return TONES[card.group];
