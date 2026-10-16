@@ -202,3 +202,32 @@ async def test_a_refused_request_is_not_retried():
     assert attempts == 1
     assert "model not found" in refusal.value.explanation
     await client.close()
+
+
+def test_the_deck_opens_with_an_hourly_stamp():
+    """Выкладка должна доезжать до человека, а чужой кэш не чистится руками."""
+    from datetime import UTC, datetime
+
+    from bot.handlers.miniapp import stamped
+
+    moment = datetime(2026, 10, 16, 3, 40, tzinfo=UTC)
+    assert stamped("https://example.github.io/deck/", moment) == (
+        "https://example.github.io/deck/?v=2026101603"
+    )
+
+    # Чужие параметры целы, своя метка не множится
+    once = stamped("https://example.github.io/deck/?mode=dark", moment)
+    assert once == "https://example.github.io/deck/?mode=dark&v=2026101603"
+    assert stamped(once, moment) == once
+
+
+def test_the_page_passes_the_stamp_on_to_its_files():
+    """Метка в адресе бессмысленна, если карточки грузятся прежними."""
+    from pathlib import Path
+
+    page = Path(__file__).resolve().parents[1] / "miniapp" / "index.html"
+    text = page.read_text(encoding="utf-8")
+
+    assert "const V = STAMP" in text
+    assert "cards/${card.id}.jpg${V}" in text
+    assert "cards.json${V}" in text

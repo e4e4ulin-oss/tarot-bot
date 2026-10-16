@@ -9,9 +9,11 @@ Telegram скачивает картинку по ссылке сам, а пол
 а изображение другое. Для этого файл нужно скачать и повернуть у себя, поэтому
 перевёрнутый вариант кэшируется отдельным ключом `<id>:rev`.
 
-Если рядом лежит своя картинка — `bot/tarot/data/cards/<id>.jpg` — используется она.
-Так можно постепенно заменить сканы фотографиями собственной колоды,
-не трогая код: имя файла совпадает с id карты (major_00, cups_01, wands_14…).
+Если своя картинка есть — берётся она. Ищется в двух местах: `bot/tarot/data/cards`,
+куда файл можно просто положить, и `miniapp/cards` — та самая колода, которая
+рисуется для мини-приложения. Второе важнее первого: нарисованная карта
+появляется в раскладах сама, без отдельного шага и без правки кода. Имя файла
+совпадает с id карты (major_00, cups_01, wands_14…).
 """
 
 from __future__ import annotations
@@ -30,6 +32,8 @@ from .deck import Card
 logger = logging.getLogger(__name__)
 
 LOCAL_DIR = Path(__file__).parent / "data" / "cards"
+# Колода мини-приложения: карты, нарисованные для этого бота
+PAINTED_DIR = Path(__file__).resolve().parents[2] / "miniapp" / "cards"
 LOCAL_SUFFIXES = (".jpg", ".jpeg", ".png", ".webp")
 
 COMMONS_BASE = "https://upload.wikimedia.org/wikipedia/commons"
@@ -77,21 +81,29 @@ def commons_url(card: Card) -> str:
 
 
 def local_path(card: Card) -> Path | None:
-    """Своя картинка для карты, если её положили рядом."""
-    for suffix in LOCAL_SUFFIXES:
-        candidate = LOCAL_DIR / f"{card.id}{suffix}"
-        if candidate.exists():
-            return candidate
+    """Своя картинка для карты, если она есть."""
+    for folder in (LOCAL_DIR, PAINTED_DIR):
+        for suffix in LOCAL_SUFFIXES:
+            candidate = folder / f"{card.id}{suffix}"
+            if candidate.exists():
+                return candidate
     return None
 
 
 REVERSED_SUFFIX = ":rev"
+OWN_SUFFIX = ":own"
 DOWNLOAD_TIMEOUT = 15.0
 
 
 def cache_key(card: Card, reversed_: bool) -> str:
-    """Перевёрнутая картинка — другой файл, значит и ключ кэша другой."""
-    return f"{card.id}{REVERSED_SUFFIX}" if reversed_ else card.id
+    """Ключ кэша картинки: он же и говорит, какая это картинка.
+
+    Перевёрнутая — другой файл, значит и другой ключ. Своя — тоже: иначе
+    карта, которую только что нарисовали, осталась бы в чате сканом Уэйта
+    навсегда, ведь file_id для её id уже сохранён.
+    """
+    own = OWN_SUFFIX if local_path(card) is not None else ""
+    return f"{card.id}{own}{REVERSED_SUFFIX if reversed_ else ''}"
 
 
 def rotate_180(data: bytes) -> bytes:

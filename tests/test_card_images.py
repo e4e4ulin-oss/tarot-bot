@@ -9,7 +9,13 @@ from PIL import Image
 
 from bot.tarot import get_card
 from bot.tarot import images as images_module
-from bot.tarot.images import REVERSED_SUFFIX, cache_key, reversed_image_bytes, rotate_180
+from bot.tarot.images import (
+    OWN_SUFFIX,
+    REVERSED_SUFFIX,
+    cache_key,
+    reversed_image_bytes,
+    rotate_180,
+)
 
 CARD = get_card("major_18")
 
@@ -49,10 +55,25 @@ def test_rotating_twice_returns_the_original_orientation():
     assert twice.getpixel((5, 5))[1] < 50  # красный снова наверху слева
 
 
-def test_cache_key_separates_the_two_orientations():
+def test_cache_key_separates_the_two_orientations(monkeypatch):
+    monkeypatch.setattr("bot.tarot.images.local_path", lambda card: None)
+
     assert cache_key(CARD, False) == "major_18"
     assert cache_key(CARD, True) == f"major_18{REVERSED_SUFFIX}"
     assert len(cache_key(CARD, True)) <= 32  # столько отведено в таблице card_images
+
+
+def test_our_own_card_gets_its_own_cache_key(monkeypatch, tmp_path):
+    """Нарисованная карта не должна застрять в чате сканом Уэйта.
+
+    File_id под ключом «major_18» уже сохранён и показывает скан. Если бы
+    ключ не менялся, своя картинка не попала бы в чат никогда.
+    """
+    monkeypatch.setattr("bot.tarot.images.local_path", lambda card: tmp_path / "major_18.jpg")
+
+    assert cache_key(CARD, False) == f"major_18{OWN_SUFFIX}"
+    assert cache_key(CARD, True) == f"major_18{OWN_SUFFIX}{REVERSED_SUFFIX}"
+    assert len(cache_key(CARD, True)) <= 32
 
 
 @pytest.mark.asyncio

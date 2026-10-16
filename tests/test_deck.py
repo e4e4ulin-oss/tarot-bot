@@ -75,8 +75,25 @@ def test_local_image_takes_priority_when_present(tmp_path, monkeypatch):
     from bot.tarot import images
 
     monkeypatch.setattr(images, "LOCAL_DIR", tmp_path)
+    monkeypatch.setattr(images, "PAINTED_DIR", tmp_path / "нет такой папки")
     card = next(c for c in load_deck() if c.id == "major_00")
     assert images.local_path(card) is None
 
     (tmp_path / "major_00.jpg").write_bytes("фото".encode())
     assert images.local_path(card) == tmp_path / "major_00.jpg"
+
+
+def test_the_painted_deck_is_used_in_readings():
+    """Нарисованная карта должна появляться в раскладе сама.
+
+    Колода мини-приложения и колода в чате — одна и та же колода. Если бы
+    расклад не знал о нарисованных картах, их пришлось бы раскладывать по
+    папкам руками, а забытая папка означала бы Уэйта в ответе бота.
+    """
+    from bot.tarot import images
+
+    card = next(c for c in load_deck() if c.id == "major_01")
+    path = images.local_path(card)
+
+    assert path is not None and path.parent.name == "cards"
+    assert path.parent.parent.name == "miniapp"

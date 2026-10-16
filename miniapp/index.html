@@ -182,7 +182,7 @@
 <div class="wrap">
   <header>
     <h1>Колода на столе</h1>
-    <p>Все 78 карт в порядке колоды. Нарисованы Маг, Верховная Жрица и Правосудие, у остальных лицо пустое,
+    <p>Все 78 карт в порядке колоды. Нарисованные показаны лицом, у остальных лицо пустое,
       но с готовым именем и тоном своей группы. Нажмите на карту — она откроется крупно,
       и там её можно перевернуть: на рубашке имя, цифра аркана, краткое и подробное значение.</p>
   </header>
@@ -209,6 +209,12 @@
 <script>
   const GOLD = 'var(--gold)';
   const DARK = '#4A2E18';
+  // Telegram кэширует мини-приложение надолго. Бот открывает колоду с меткой
+  // времени в адресе, и эту же метку страница приписывает к своим файлам:
+  // перерисованная карта тогда доезжает, а не остаётся прежней.
+  const STAMP = new URLSearchParams(location.search).get('v');
+  const V = STAMP ? `?v=${encodeURIComponent(STAMP)}` : '';
+
   const TONES = {
     fool:      { bg: 'var(--tone-fool)',      ink: DARK, back: 'backs/back-fool.jpg' },
     major1:    { bg: 'var(--tone-major-1)',   ink: GOLD, back: 'backs/back-major1.jpg' },
@@ -256,7 +262,7 @@
 
   function cardHtml(card) {
     const tone = toneFor(card);
-    const painted = PAINTED.has(card.id) ? `cards/${card.id}.jpg` : null;
+    const painted = PAINTED.has(card.id) ? `cards/${card.id}.jpg${V}` : null;
     return `
       <button class="card" aria-label="${card.name}" aria-pressed="false">
         <div class="side face${painted ? '' : ' pending'}" style="--tone:${tone.bg};--card-ink:${tone.ink}">
@@ -265,7 +271,7 @@
           ${painted ? '' : '<div class="waiting">не нарисована</div>'}
         </div>
         <div class="side back" style="--card-ink:${tone.ink}">
-          <img src="${tone.back}" alt="Рубашка карты" loading="lazy">
+          <img src="${tone.back}${V}" alt="Рубашка карты" loading="lazy">
           <div class="copy">
             <div>${nameHtml(card, true)}<div class="motto">${motto(card)}</div></div>
             <div class="card-text">${card.text}</div>
@@ -335,7 +341,7 @@
     count.textContent = `${shown.length} карт · нарисовано ${cards.filter((c) => PAINTED.has(c.id)).length}`;
   }
 
-  fetch('cards.json')
+  fetch(`cards.json${V}`)
     .then((r) => r.json())
     .then((data) => { cards = data; render('all'); })
     .catch(() => { count.textContent = 'Не удалось загрузить колоду'; });
