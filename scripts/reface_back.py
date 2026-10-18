@@ -88,9 +88,10 @@ def shade(painted: Image.Image, back: Image.Image, deepen: float = 1.0) -> Image
 def restore_level(result: Image.Image, target: tuple[int, int, int]) -> Image.Image:
     """Возвращает фону заданный тон после усиления затемнений.
 
-    Усиление, которым вытягивают тёмный орнамент на светлой рубашке, затемняет
-    заодно и всё поле: бронза Шута уехала от своих лиц на 15 при допуске 12.
-    Здесь медиана результата приводится обратно к медиане заданного тона.
+    Перенос светотени и усиление, которым вытягивают тёмный орнамент на светлой
+    рубашке, затемняют заодно и всё поле: бронза Шута уезжала от своих лиц на 15–17
+    при допуске 12. Здесь медиана результата приводится обратно к медиане заданного
+    тона, и тон перестаёт зависеть от того, что делалось с орнаментом.
     """
     grey = result.convert("L")
     want = round(0.299 * target[0] + 0.587 * target[1] + 0.114 * target[2])
@@ -109,33 +110,47 @@ def main() -> int:
     parser.add_argument("out", type=Path)
     parser.add_argument("--dark", action="store_true",
                         help="орнамент темнее фона, как на бронзовой рубашке Шута")
+    parser.add_argument("--ornament", type=Path,
+                        help="рубашка, с которой снять орнамент (по умолчанию своя)")
+    parser.add_argument("--ink", help='залить орнамент цветом, например "#4A2E18"')
     args = parser.parse_args()
 
     back = Image.open(args.back).convert("RGB")
     field = Image.open(args.field).convert("RGB").resize(back.size, Image.LANCZOS)
 
+    # Орнамент на всех восьми рубашках один и тот же: они собраны из одних слоёв,
+    # и маски сходятся на 98%. Но на Жезлах контур картуша стёрся при давней
+    # перекраске — там он ярче фона всего на двадцатую, — поэтому орнамент берут
+    # с самой чёткой рубашки и ставят всем, чтобы рисунок был единым.
+    source = Image.open(args.ornament).convert("RGB").resize(back.size, Image.LANCZOS) \
+        if args.ornament else back
+
     # На светлой рубашке тёмный орнамент отличается от фона всего на проценты:
     # контур картуша у Шута темнее его бронзы на девять, и на фактурном поле он
     # тонет. Поэтому там затемнения усиливаются.
-    painted = shade(tint(field, hex_to_rgb(args.tone)), back, 3.0 if args.dark else 1.0)
+    # Светотень берут из своей рубашки, когда орнамент на неё только наносится
+    # краской: у кармина картуш темнее фона, а у бронзы Шута вровень с ним, и чужое
+    # затемнение утягивает всю бронзу.
+    shading = source if args.ornament and not (args.ink or args.dark) else back
+    painted = shade(tint(field, hex_to_rgb(args.tone)), shading, 3.0 if args.dark else 1.0)
 
     if args.dark:
         # Весь орнамент здесь темнее фона и уже перенесён светотенью: золота нет
         result = painted
         told = "орнамент перенесён целиком как затемнение"
     else:
-        mask, share = gold_mask(back)
+        mask, share = gold_mask(source)
         if not GOLD_MIN <= share <= GOLD_MAX:
             print(
                 f"орнамент занял {share:.0%} кадра — порогом по яркости он от фона не "
                 "отделяется. Если он темнее фона, пустите с --dark."
             )
             return 1
-        result = Image.composite(back, painted, mask)
+        ink = Image.new("RGB", back.size, hex_to_rgb(args.ink)) if args.ink else source
+        result = Image.composite(ink, painted, mask)
         told = f"орнамент ({share:.0%} кадра) пересажен"
 
-    if args.dark:
-        result = restore_level(result, hex_to_rgb(args.tone))
+    result = restore_level(result, hex_to_rgb(args.tone))
     result.save(args.out, quality=92, optimize=True)
 
     print(f"{told} на новое поле в тоне {args.tone} → {args.out}")
