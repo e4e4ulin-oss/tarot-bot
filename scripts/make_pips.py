@@ -31,8 +31,8 @@ BOARD_SIZE = (720, 1080)
 SUITS: dict[str, str] = {
     "wands": "#6D1A01",
     "cups": "#123A4A",
-    "swords": "#2E2A38",
-    "pentacles": "#2C3A1E",
+    "swords": "#29232B",
+    "pentacles": "#262813",
 }
 
 BRASS = (0xB9, 0x8A, 0x3C)

@@ -39,8 +39,8 @@ SEAM = 18
 SUIT_TONES = {
     "wands": "#6D1A01",
     "cups": "#123A4A",
-    "swords": "#2E2A38",
-    "pentacles": "#2C3A1E",
+    "swords": "#29232B",
+    "pentacles": "#262813",
 }
 
 
