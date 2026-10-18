@@ -13,7 +13,7 @@ from io import BytesIO
 import pytest
 from PIL import Image
 
-from bot.tarot.layout import CARD_WIDTH, GAP, PAD, columns_for, compose, sheet
+from bot.tarot.layout import CARD_WIDTH, GAP, PAD, columns_for, compose, row_sizes, sheet
 
 
 def card_bytes(colour: tuple[int, int, int] = (120, 20, 20)) -> bytes:
@@ -70,3 +70,11 @@ async def test_no_pictures_at_all_means_no_sheet(monkeypatch):
 
 async def _none() -> None:
     return None
+
+
+def test_rows_are_divided_evenly():
+    """Остаток, собранный в последнем ряду, читается как недостача."""
+    assert row_sizes(10) == [4, 3, 3]
+    assert row_sizes(7) == [3, 2, 2]
+    assert row_sizes(5) == [3, 2]
+    assert all(sum(row_sizes(n)) == n for n in range(1, 11))

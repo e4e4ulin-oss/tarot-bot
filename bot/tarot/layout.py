@@ -51,6 +51,18 @@ def columns_for(count: int) -> int:
     return min(4, math.ceil(math.sqrt(count)))
 
 
+def row_sizes(count: int) -> list[int]:
+    """По скольку карт в каждом ряду.
+
+    Ряды делятся поровну: десять карт — это 4 + 3 + 3, а не 4 + 4 + 2.
+    Остаток, собранный в последнем ряду, читается как недостача.
+    """
+    columns = columns_for(count)
+    rows = math.ceil(count / columns)
+    base, extra = divmod(count, rows)
+    return [base + (1 if index < extra else 0) for index in range(rows)]
+
+
 def _place(card: Image.Image, cell: tuple[int, int]) -> Image.Image:
     """Карта, вписанная в место целиком — пропорции чужими не делаем."""
     return ImageOps.contain(card.convert("RGB"), cell, Image.LANCZOS)
@@ -59,22 +71,25 @@ def _place(card: Image.Image, cell: tuple[int, int]) -> Image.Image:
 def compose(files: list[bytes | None]) -> bytes:
     """Лист с картами в порядке расклада."""
     count = len(files)
-    columns = columns_for(count)
-    rows = math.ceil(count / columns)
+    sizes = row_sizes(count)
     cell = (CARD_WIDTH, round(CARD_WIDTH * CARD_RATIO))
 
-    width = PAD * 2 + columns * cell[0] + GAP * (columns - 1)
-    height = PAD * 2 + rows * cell[1] + GAP * (rows - 1)
+    widest = max(sizes)
+    width = PAD * 2 + widest * cell[0] + GAP * (widest - 1)
+    height = PAD * 2 + len(sizes) * cell[1] + GAP * (len(sizes) - 1)
     sheet = Image.new("RGB", (width, height), BACKGROUND)
     draw = ImageDraw.Draw(sheet)
     font = ImageFont.load_default(size=NUMBER_SIZE)
 
+    places = [
+        (row, column) for row, size in enumerate(sizes) for column in range(size)
+    ]
+
     for index, data in enumerate(files):
-        row, column = divmod(index, columns)
-        # Последний ряд бывает неполным, и он ставится по центру: иначе лист
-        # заваливается влево и выглядит обрезанным
-        in_row = min(columns, count - row * columns)
-        row_width = in_row * cell[0] + GAP * (in_row - 1)
+        row, column = places[index]
+        # Неполный ряд ставится по центру: иначе лист заваливается влево и
+        # выглядит обрезанным
+        row_width = sizes[row] * cell[0] + GAP * (sizes[row] - 1)
         left = (width - row_width) // 2 + column * (cell[0] + GAP)
         top = PAD + row * (cell[1] + GAP)
 
