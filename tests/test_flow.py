@@ -410,6 +410,45 @@ async def test_reading_sends_card_images_and_caches_file_ids(env):
 
 
 @pytest.mark.asyncio(loop_scope="module")
+async def test_a_big_spread_arrives_as_one_sheet(env, monkeypatch):
+    """Пять карт по отдельности — лента, а не расклад.
+
+    Проверяется и то, что лист вообще уходит: сказать «выпала пятёрка кубков»
+    и не показать её — ровно то, на что жаловались.
+    """
+    from io import BytesIO
+
+    from PIL import Image
+
+    from bot.handlers.auto import send_card_images
+    from bot.tarot import draw_spread, get_spread
+
+    def one_card() -> bytes:
+        buffer = BytesIO()
+        Image.new("RGB", (720, 1080), (120, 20, 20)).save(buffer, format="JPEG")
+        return buffer.getvalue()
+
+    # Картинки берём свои: иначе тест пошёл бы за сканами в сеть
+    async def painted(card) -> bytes:
+        return one_card()
+
+    monkeypatch.setattr("bot.tarot.layout.card_image_bytes", painted)
+    monkeypatch.setattr("bot.tarot.layout.reversed_image_bytes", painted)
+
+    dp, bot, session, factory = env
+    drawn = draw_spread(get_spread("love"))
+
+    session.clear()
+    async with factory() as db:
+        await send_card_images(bot, 1042, drawn, Repo(db), dp["settings"])
+
+    photos = session.methods("SendPhoto")
+    assert len(photos) == 1, session.calls
+    assert not session.methods("SendMediaGroup")
+    assert "порядке расклада" in (photos[0].caption or "")
+
+
+@pytest.mark.asyncio(loop_scope="module")
 async def test_order_reaches_every_admin(env):
     """Заявка приходит и в админ-чат, и в личку каждого, кто ведёт разборы."""
     dp, bot, session, factory = env

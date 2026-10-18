@@ -45,6 +45,7 @@ from ..tarot import (
     serialize,
 )
 from ..tarot.images import cache_key, commons_url, local_path, reversed_image_bytes
+from ..tarot.layout import sheet
 from ..utils import split_text
 
 logger = logging.getLogger(__name__)
@@ -193,7 +194,13 @@ async def send_card_images(
     Присланный Telegram file_id сохраняется, поэтому к источнику бот идёт один раз на карту.
     Картинки — украшение: любая неудача здесь не должна мешать раскладу.
     """
-    if not settings.send_card_images or len(drawn) > settings.image_cards_limit:
+    if not settings.send_card_images:
+        return
+
+    # Большой расклад уходит одним листом: пять отдельных фотографий — это уже
+    # лента, в которой не видно ни порядка, ни расклада целиком
+    if len(drawn) > settings.image_cards_limit:
+        await send_spread_sheet(bot, chat_id, drawn)
         return
 
     cached = await repo.card_file_ids(
@@ -212,6 +219,27 @@ async def send_card_images(
         # под перевёрнутым ключом нельзя, иначе она застрянет там навсегда.
         if key is not None and sent_message.photo:
             await repo.save_card_file_id(key, sent_message.photo[-1].file_id)
+
+
+async def send_spread_sheet(bot: Bot, chat_id: int, drawn: list[DrawnCard]) -> None:
+    """Расклад одной картинкой: карты по порядку, с номерами.
+
+    Лист собирается каждый раз заново — сочетание карт своё у каждого
+    расклада, и кэшировать его незачем.
+    """
+    picture = await sheet(drawn)
+    if picture is None:
+        logger.warning("Лист расклада не собрался: картинок карт не досталось")
+        return
+
+    try:
+        await bot.send_photo(
+            chat_id,
+            BufferedInputFile(picture, filename="spread.jpg"),
+            caption=texts.SPREAD_SHEET,
+        )
+    except TelegramAPIError as exc:
+        logger.warning("Лист расклада отправить не удалось: %s", exc)
 
 
 async def _card_photo(

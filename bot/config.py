@@ -104,8 +104,8 @@ class Settings(BaseSettings):
 
     # --- Картинки карт ---
     send_card_images: bool = Field(default=True, alias="SEND_CARD_IMAGES")
-    # Раскладам крупнее этого числа картинки не отправляются: десять фото подряд
-    # превращают чат в свалку
+    # До этого числа карты уходят отдельными фотографиями, выше — одним листом:
+    # десять фото подряд превращают чат в свалку
     image_cards_limit: int = Field(default=3, alias="IMAGE_CARDS_LIMIT")
 
     # --- Правила работы ---
