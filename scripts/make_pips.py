@@ -32,7 +32,7 @@ SUITS: dict[str, str] = {
     "wands": "#6D1A01",
     "cups": "#123A4A",
     "swords": "#29232B",
-    "pentacles": "#2C3A1E",
+    "pentacles": "#262813",
 }
 
 BRASS = (0xB9, 0x8A, 0x3C)

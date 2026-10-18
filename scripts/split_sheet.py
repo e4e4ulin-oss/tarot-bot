@@ -40,7 +40,7 @@ SUIT_TONES = {
     "wands": "#6D1A01",
     "cups": "#123A4A",
     "swords": "#29232B",
-    "pentacles": "#2C3A1E",
+    "pentacles": "#262813",
 }
 
 
