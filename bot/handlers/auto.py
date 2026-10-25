@@ -17,7 +17,7 @@ from aiogram.types import (
 )
 from aiogram.utils.chat_action import ChatActionSender
 
-from .. import analytics, texts
+from .. import analytics, referrals, texts
 from ..config import Settings
 from ..db import Repo
 from ..keyboards import (
@@ -40,6 +40,7 @@ from ..tarot import (
 )
 from ..tarot.images import cache_key, commons_url, local_path, reversed_image_bytes
 from ..tarot.layout import sheet
+from .invite import tell_the_inviter
 from ..utils import split_text
 
 logger = logging.getLogger(__name__)
@@ -326,4 +327,10 @@ async def run_reading(
             chunk + (f"\n\n<i>{DISCLAIMER}</i>" if is_last else ""),
             reply_markup=after_reading_menu(settings.author_name) if is_last else None,
         )
+
+    # Пригласивший получает своё, когда приглашённый дошёл до первого расклада,
+    # а не когда нажал «старт»: за нажатие платят спамеры
+    rewarded = await referrals.reward(repo, settings, user_id)
+    if rewarded is not None and rewarded[1]:
+        await tell_the_inviter(message, *rewarded)
 

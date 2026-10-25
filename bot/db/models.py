@@ -12,13 +12,12 @@ from sqlalchemy import (
     DateTime,
     Enum,
     Float,
-    ForeignKey,
     Integer,
     String,
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import JSON
 
 
@@ -82,6 +81,15 @@ class User(Base):
     birth_lon: Mapped[float | None] = mapped_column(Float)
     birth_tz: Mapped[str | None] = mapped_column(String(48))
     city: Mapped[str | None] = mapped_column(String(64))
+
+    # Кто привёл человека в бота. Ставится один раз, при первом входе по
+    # ссылке: позже «вспомнить» пригласившего нельзя — иначе награду можно
+    # выписать себе задним числом
+    invited_by: Mapped[int | None] = mapped_column(BigInteger, index=True)
+    # Расклады сверх обычных бесплатных: за приглашённых и за промокоды.
+    # Хранится числом, а не историей начислений: история есть в событиях,
+    # а доступу нужен остаток
+    bonus_readings: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
     @property
     def display(self) -> str:
@@ -223,6 +231,50 @@ class Payment(Base):
     )
     # Проставляется, когда по этому платежу сделан расклад
     spent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class PromoCode(Base):
+    """Промокод: несколько бесплатных раскладов тому, кто его ввёл.
+
+    Код принадлежит арендатору: у двух франчайзи может быть одинаковое слово
+    с разной щедростью, и чужой код в своём боте не работает.
+    """
+
+    __tablename__ = "promo_codes"
+    __table_args__ = (UniqueConstraint("tenant_id", "code", name="uq_promo_code"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, default=1, index=True)
+    # Хранится в верхнем регистре: человек наберёт как придётся
+    code: Mapped[str] = mapped_column(String(32), index=True)
+    readings: Mapped[int] = mapped_column(Integer, default=1)
+    # Ноль — без ограничения: не «кончился», а «не считаем»
+    uses_limit: Mapped[int] = mapped_column(Integer, default=0)
+    used: Mapped[int] = mapped_column(Integer, default=0)
+    expires_at: Mapped[date | None] = mapped_column(Date)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    note: Mapped[str | None] = mapped_column(String(128))
+
+
+class PromoUse(Base):
+    """След того, что код уже использован этим человеком.
+
+    Нужен не для отчётов, а для запрета: без него один код вводят столько раз,
+    сколько хватит терпения.
+    """
+
+    __tablename__ = "promo_uses"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "code_id", "user_id", name="uq_promo_use"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, default=1, index=True)
+    code_id: Mapped[int] = mapped_column(Integer, index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    readings: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class Tenant(Base):

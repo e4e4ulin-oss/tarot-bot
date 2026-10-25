@@ -86,4 +86,12 @@ async def test_stats(repo):
     await repo.upsert_user(1, None, "A")
     await repo.create_order(user_id=1, question="q", topic=None, contact=None)
     stats = await repo.stats()
-    assert stats == {"users": 1, "readings": 0, "orders": 1, "open_orders": 1}
+    assert stats == {
+        "users": 1,
+        "readings": 0,
+        "orders": 1,
+        "open_orders": 1,
+        # Откуда пришли люди: никого не приглашали и кодов не вводили
+        "invited": 0,
+        "promo_used": 0,
+    }

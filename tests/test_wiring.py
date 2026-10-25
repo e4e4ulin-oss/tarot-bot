@@ -26,6 +26,7 @@ def test_router_order_keeps_fallback_last():
         "daily",
         "auto",
         "author",
+        "invite",
         "miniapp",
         "payments",
         "profile",

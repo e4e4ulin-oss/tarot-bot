@@ -18,6 +18,10 @@ class ProfileFlow(StatesGroup):
     city = State()
 
 
+class PromoFlow(StatesGroup):
+    waiting_code = State()
+
+
 class AuthorFlow(StatesGroup):
     waiting_question = State()
     waiting_contact = State()

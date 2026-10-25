@@ -25,6 +25,12 @@ DAILY_OPEN: Final = "daily_open"
 DAILY_SUBSCRIBED: Final = "daily_subscribed"
 DAILY_SENT: Final = "daily_sent"
 
+# Приглашения и промокоды: не шаг пути к заказу, а то, откуда человек взялся
+# и чем ему за это заплатили
+REFERRAL_JOIN: Final = "referral_join"
+REFERRAL_REWARD: Final = "referral_reward"
+PROMO_USED: Final = "promo_used"
+
 # Порядок важен: по нему считаются переходы между шагами.
 FUNNEL: Final[tuple[tuple[str, str], ...]] = (
     (START, "Зашли в бота"),

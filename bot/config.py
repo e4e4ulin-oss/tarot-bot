@@ -99,6 +99,12 @@ class Settings(BaseSettings):
     service_name: str = Field(default="tarot-bot", alias="SERVICE_NAME")
     update_script: str = Field(default="/usr/local/bin/tarot-update", alias="UPDATE_SCRIPT")
 
+    # --- Приглашения ---
+    # Сколько бесплатных раскладов получает пригласивший, когда приглашённый
+    # сделал свой первый расклад, и сколько получает сам приглашённый
+    referral_bonus: int = Field(default=2, alias="REFERRAL_BONUS")
+    referral_welcome: int = Field(default=1, alias="REFERRAL_WELCOME")
+
     # --- Хранилище ---
     database_url: str = Field(default="sqlite+aiosqlite:///data/tarot.db", alias="DATABASE_URL")
 
@@ -128,6 +134,8 @@ class Settings(BaseSettings):
         "grok_temperature",
         "grok_timeout",
         "image_cards_limit",
+        "referral_bonus",
+        "referral_welcome",
         "max_question_length",
         "send_card_images",
         "reversed_chance",

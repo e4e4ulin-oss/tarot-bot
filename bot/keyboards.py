@@ -19,7 +19,17 @@ def main_menu(author_name: str) -> InlineKeyboardMarkup:
     builder.button(text="✍️ Авторский разбор", callback_data="menu:author")
     builder.button(text="📜 Мои расклады", callback_data="menu:history")
     builder.button(text="👤 Личный кабинет", callback_data="menu:profile")
+    builder.button(text="🎁 Пригласить друга", callback_data="menu:invite")
     builder.button(text="ℹ️ О раскладах", callback_data="menu:about")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def invite_menu() -> InlineKeyboardMarkup:
+    """Ссылку удобнее переслать, а не копировать руками."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🎟 Ввести промокод", callback_data="promo:enter")
+    builder.button(text="‹ Назад", callback_data="menu:main")
     builder.adjust(1)
     return builder.as_markup()
 

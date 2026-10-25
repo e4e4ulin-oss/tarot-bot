@@ -14,6 +14,8 @@ from .models import (
     Order,
     OrderStatus,
     Payment,
+    PromoCode,
+    PromoUse,
     Reading,
     ReadingMode,
     Tenant,
@@ -126,6 +128,105 @@ class Repo:
                 setattr(user, name, value)
         await self.session.commit()
         return user
+
+    # --- Приглашения и промокоды ----------------------------------------
+    async def add_bonus(self, user_id: int, readings: int) -> int:
+        """Начисляет бесплатные расклады сверх обычных. Возвращает остаток."""
+        user = await self.session.get(User, (self.tenant_id, user_id))
+        if user is None:
+            user = User(tenant_id=self.tenant_id, id=user_id)
+            self.session.add(user)
+        user.bonus_readings = (user.bonus_readings or 0) + readings
+        await self.session.commit()
+        return user.bonus_readings
+
+    async def remember_inviter(self, user_id: int, inviter_id: int) -> bool:
+        """Запоминает, кто привёл человека. Второй раз — уже нет.
+
+        Пригласивший проставляется один раз и навсегда: иначе достаточно
+        перезайти по чужой ссылке, чтобы выписать награду заново.
+        """
+        user = await self.session.get(User, (self.tenant_id, user_id))
+        if user is None or user.invited_by is not None:
+            return False
+        user.invited_by = inviter_id
+        await self.session.commit()
+        return True
+
+    async def invited_count(self, user_id: int) -> int:
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(User)
+            .where(User.tenant_id == self.tenant_id, User.invited_by == user_id)
+        )
+        return int(result.scalar_one())
+
+    async def promo_by_code(self, code: str) -> PromoCode | None:
+        result = await self.session.execute(
+            select(PromoCode).where(
+                PromoCode.tenant_id == self.tenant_id, PromoCode.code == code.upper()
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def promo_used_by(self, code_id: int, user_id: int) -> bool:
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(PromoUse)
+            .where(
+                PromoUse.tenant_id == self.tenant_id,
+                PromoUse.code_id == code_id,
+                PromoUse.user_id == user_id,
+            )
+        )
+        return bool(result.scalar_one())
+
+    async def take_promo(self, promo: PromoCode, user_id: int) -> PromoUse:
+        """Отмечает код использованным и начисляет расклады — одним заходом."""
+        use = PromoUse(
+            tenant_id=self.tenant_id,
+            code_id=promo.id,
+            user_id=user_id,
+            readings=promo.readings,
+        )
+        self.session.add(use)
+        promo.used += 1
+        await self.session.commit()
+        await self.add_bonus(user_id, promo.readings)
+        return use
+
+    async def add_promo(
+        self,
+        code: str,
+        readings: int,
+        uses_limit: int = 0,
+        expires_at: date | None = None,
+        note: str | None = None,
+    ) -> PromoCode:
+        promo = PromoCode(
+            tenant_id=self.tenant_id,
+            code=code.upper(),
+            readings=readings,
+            uses_limit=uses_limit,
+            expires_at=expires_at,
+            note=note,
+        )
+        self.session.add(promo)
+        await self.session.commit()
+        return promo
+
+    async def promos(self, limit: int = 30) -> list[PromoCode]:
+        result = await self.session.execute(
+            select(PromoCode)
+            .where(PromoCode.tenant_id == self.tenant_id)
+            .order_by(PromoCode.created_at.desc())
+            .limit(limit)
+        )
+        return list(result.scalars())
+
+    async def set_promo_active(self, promo: PromoCode, active: bool) -> None:
+        promo.active = active
+        await self.session.commit()
 
     # --- Расклады -------------------------------------------------------
     async def save_reading(
@@ -415,11 +516,18 @@ class Repo:
             )
             or 0
         )
+        # Откуда люди и чем за них заплачено — вопрос владельца, а не клиента
+        invited = int(
+            await self.session.scalar(count(User).where(User.invited_by.is_not(None))) or 0
+        )
+        promo_used = int(await self.session.scalar(count(PromoUse)) or 0)
         return {
             "users": users,
             "readings": readings,
             "orders": orders,
             "open_orders": open_orders,
+            "invited": invited,
+            "promo_used": promo_used,
         }
 
     # --- Арендаторы -------------------------------------------------------

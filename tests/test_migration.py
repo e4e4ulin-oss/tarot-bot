@@ -279,3 +279,47 @@ async def test_the_model_pass_does_not_cancel_the_rebuild(tmp_path: Path):
     assert {row[1] for row in rows if row[5]} == {"tenant_id", "id"}
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_the_referral_columns_reach_a_live_users_table(tmp_path: Path):
+    """Приглашения и промокоды добавили два поля человеку и две таблицы.
+
+    У работающего бота таблица users уже есть, и create_all её не тронет.
+    Ровно на этом бот однажды и перестал запускаться.
+    """
+    engine = create_engine(f"sqlite+aiosqlite:///{tmp_path / 'grown.db'}")
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "CREATE TABLE users (tenant_id INTEGER NOT NULL, id INTEGER NOT NULL, "
+                "username VARCHAR(64), first_name VARCHAR(128), created_at DATETIME, "
+                "daily_subscribed BOOLEAN DEFAULT 0 NOT NULL, "
+                "PRIMARY KEY (tenant_id, id))"
+            )
+        )
+        await conn.execute(
+            text(
+                "INSERT INTO users (tenant_id, id, first_name, created_at, daily_subscribed) "
+                "VALUES (1, 5, 'Старый клиент', '2026-01-01 00:00:00', 1)"
+            )
+        )
+
+    await init_models(engine)
+
+    assert {"invited_by", "bonus_readings"} <= await columns(engine, "users")
+
+    factory = create_session_factory(engine)
+    async with factory() as session:
+        repo = Repo(session)
+        user = await repo.get_user(5)
+        assert user is not None and user.first_name == "Старый клиент"
+        # Ни пригласившего, ни бонусов у старого клиента нет — и это не None
+        assert user.invited_by is None and user.bonus_readings == 0
+        assert await repo.add_bonus(5, 2) == 2
+
+        # Таблицы промокодов создались сами
+        await repo.add_promo("ОСЕНЬ", readings=1)
+        assert len(await repo.promos()) == 1
+
+    await engine.dispose()

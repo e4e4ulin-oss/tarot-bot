@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from aiogram import F, Router
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from .. import analytics, texts
+from .. import analytics, referrals, texts
 from ..config import Settings
 from ..db import Repo
 from ..keyboards import back_to_menu, main_menu
@@ -29,10 +29,23 @@ async def show_main_menu(message: Message, settings: Settings, *, edit: bool = F
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, state: FSMContext, settings: Settings, repo: Repo) -> None:
+async def cmd_start(
+    message: Message,
+    command: CommandObject,
+    state: FSMContext,
+    settings: Settings,
+    repo: Repo,
+) -> None:
     await state.clear()
     if message.from_user is not None:
         await repo.log_event(message.from_user.id, analytics.START)
+
+    # Хвост ссылки говорит, кто привёл человека. Подарок выдаётся сразу: это
+    # первое, что он здесь видит, и оно должно быть приятным
+    joined = await referrals.join(repo, settings, message.chat.id, command.args)
+    if joined is not None and joined.welcome:
+        await message.answer(texts.INVITE_WELCOME.format(welcome=joined.welcome))
+
     await show_main_menu(message, settings)
 
 

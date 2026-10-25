@@ -3,6 +3,10 @@
 Правило простое: несколько первых раскладов бесплатны тем, кто подписан на
 карту дня, дальше расклад оплачивается. Решение вынесено сюда, а не в хендлер,
 потому что проверять его придётся из нескольких мест, а менять — часто.
+
+Бесплатных раскладов может быть больше обычного: за приглашённых друзей и за
+промокоды. Это не вторая валюта, а то же самое число — бесплатная полоса просто
+длиннее, и человеку видно один остаток, а не два.
 """
 
 from __future__ import annotations
@@ -33,7 +37,11 @@ async def check(repo: Repo, settings: Settings, user_id: int) -> Access:
         return Access(True, "owner", free_left=0)
 
     used = await repo.count_auto_readings(user_id)
-    free_left = max(0, settings.free_auto_readings - used)
+    # Расклады за приглашённых и промокоды просто продлевают бесплатную полосу:
+    # отдельной валюты заводить незачем, а остаток человеку виден одним числом
+    user = await repo.get_user(user_id)
+    granted = settings.free_auto_readings + (user.bonus_readings if user else 0)
+    free_left = max(0, granted - used)
 
     if free_left:
         if settings.free_needs_daily and not await repo.is_daily_subscribed(user_id):
