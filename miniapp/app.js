@@ -20,6 +20,36 @@
     if (tg.disableVerticalSwipes) tg.disableVerticalSwipes();
     if (tg.setHeaderColor) tg.setHeaderColor("#080d1f");
     if (tg.setBackgroundColor) tg.setBackgroundColor("#080d1f");
+
+    // Во весь экран: карты и разбор занимают всю высоту, а не две трети.
+    // Доступно с Bot API 8.0 и только на телефонах — на компьютере окно
+    // приложения и так своё, и разворачивать там нечего.
+    const fullscreenReady =
+      typeof tg.requestFullscreen === "function" &&
+      typeof tg.isVersionAtLeast === "function" &&
+      tg.isVersionAtLeast("8.0");
+    const phone = ["android", "ios"].includes(String(tg.platform || "").toLowerCase());
+
+    if (fullscreenReady && phone && !tg.isFullscreen) {
+      try {
+        tg.requestFullscreen();
+      } catch (err) {
+        // Отказали — приложение просто останется развёрнутым, как было
+      }
+    }
+
+    // В полноэкранном режиме кнопки Telegram висят поверх страницы: отступы
+    // приходят отдельными переменными, и без них шапка уезжает под них.
+    const syncInsets = () => {
+      document.documentElement.classList.toggle("fullscreen", Boolean(tg.isFullscreen));
+    };
+    syncInsets();
+    if (tg.onEvent) {
+      tg.onEvent("fullscreenChanged", syncInsets);
+      tg.onEvent("fullscreenFailed", syncInsets);
+      tg.onEvent("safeAreaChanged", syncInsets);
+      tg.onEvent("contentSafeAreaChanged", syncInsets);
+    }
   }
 
   const tap = (style = "light") => {
@@ -93,13 +123,9 @@
   const loaded = new Set();
 
   function show(name) {
-    if (name === "deck") {
-      // Колода — отдельная страница: она самодостаточна и уже умеет всё,
-      // что нужно, а держать её внутри оболочки значит грузить 78 картинок
-      // вместе с каждым запуском приложения
-      location.href = "deck.html";
-      return;
-    }
+    // Разворот карты закрываем до перехода: иначе он останется поверх
+    // нового экрана и перехватит первое же нажатие
+    if (window.DeckScreen && window.DeckScreen.isOpen()) window.DeckScreen.close();
     screens.forEach((s) => s.classList.toggle("on", s.dataset.tab === name));
     tabs.forEach((t) => t.classList.toggle("on", t.dataset.go === name));
     window.scrollTo({ top: 0 });
@@ -121,6 +147,19 @@
   let config = null;
 
   const render = {
+    async deck() {
+      // 78 карт грузятся при первом открытии вкладки, а не на старте.
+      // Модуля может не оказаться, если Telegram отдал страницу из кэша
+      // вперемешку со старыми файлами — тогда честно скажем об этом.
+      if (!window.DeckScreen) {
+        $("#s-deck").innerHTML =
+          '<div class="card"><h3>Колода не загрузилась</h3>' +
+          "<p>Закройте и откройте приложение заново.</p></div>";
+        return;
+      }
+      await window.DeckScreen.render($("#s-deck"));
+    },
+
     async daily() {
       const body = $("#daily-body");
       try {
@@ -1166,6 +1205,21 @@
   }
 
   // --- старт ----------------------------------------------------------------
+
+  // Системная кнопка «назад» принадлежит развороту карты, пока он открыт:
+  // внутри Telegram это первое, что нажимают, и закрывать приложение она
+  // в этот момент не должна.
+  if (window.DeckScreen && tg && tg.BackButton) {
+    window.DeckScreen.onViewerOpen = () => {
+      tg.BackButton.show();
+    };
+    window.DeckScreen.onViewerClose = () => {
+      tg.BackButton.hide();
+    };
+    tg.BackButton.onClick(() => {
+      if (window.DeckScreen.isOpen()) window.DeckScreen.close();
+    });
+  }
 
   function startScreen() {
     // Бот передаёт экран якорем (#spread) или параметром запуска: человек

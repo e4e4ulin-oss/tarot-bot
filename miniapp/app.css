@@ -21,6 +21,9 @@
   --shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
   --radius: 18px;
   --bar: 64px;
+  /* Отступы под вырез экрана и под кнопки Telegram. Обычный режим обходится
+     системными env(), а в полноэкранном Telegram выставляет свои переменные:
+     над страницей висят «закрыть» и «меню», и без запаса шапка уедет под них. */
   --sat: env(safe-area-inset-top, 0px);
   --sab: env(safe-area-inset-bottom, 0px);
   --serif: "Cormorant Garamond", Georgia, serif;
@@ -575,4 +578,257 @@ label.note {
 
 .tab.on {
   color: var(--gold);
+}
+
+/* --- колода внутри приложения -------------------------------------------
+   Карты оставлены такими, какими их нарисовали: тона мастей, рубашка,
+   переворот. Поменялось только окружение — теперь это экран приложения,
+   а не отдельная страница со своей вёрсткой. */
+
+:root {
+  --card-min: 180px;
+  --deck-gold: #e3c06a;
+}
+
+.deck-tools,
+.deck-sizes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.deck-tools .note {
+  margin-left: auto;
+}
+
+.deck-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr));
+  gap: 14px;
+  margin-top: 10px;
+}
+
+.group-title {
+  grid-column: 1 / -1;
+  font-family: var(--serif);
+  font-size: 19px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--gold-dim);
+  margin: 18px 0 2px;
+}
+
+.group-title:first-child {
+  margin-top: 0;
+}
+
+.dslot {
+  perspective: 1200px;
+  container-type: inline-size;
+}
+
+.dcard {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  transform-style: preserve-3d;
+  transition: transform 620ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  border: 0;
+  padding: 0;
+  background: none;
+  display: block;
+  cursor: pointer;
+}
+
+.dcard.flipped {
+  transform: rotateY(180deg);
+}
+
+.dside {
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+  overflow: hidden;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  box-shadow: 0 1px 0 rgba(255, 228, 184, 0.18) inset, 0 10px 20px rgba(0, 0, 0, 0.5);
+}
+
+.dside::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1px solid rgba(227, 192, 106, 0.34);
+  pointer-events: none;
+}
+
+.dside img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.dback {
+  transform: rotateY(180deg);
+}
+
+.face {
+  background: var(--tone, #8f0303);
+}
+
+.face.pending::before {
+  content: "";
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  top: 30%;
+  bottom: 10%;
+  border: 1px dashed color-mix(in srgb, var(--card-ink) 30%, transparent);
+  border-radius: 8px;
+}
+
+.face.pending .waiting-mark {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 54%;
+  text-align: center;
+  font-size: 5cqw;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--card-ink) 50%, transparent);
+}
+
+.dtitle {
+  position: absolute;
+  top: 8%;
+  left: 6%;
+  right: 6%;
+  text-align: center;
+  color: var(--card-ink, var(--deck-gold));
+  font-family: var(--serif);
+  line-height: 1.1;
+}
+
+.dtitle .name {
+  font-size: 9.5cqw;
+  letter-spacing: 0.09em;
+  text-indent: 0.09em;
+}
+
+.dtitle .name.second {
+  margin-top: 0.08em;
+}
+
+.copy {
+  position: absolute;
+  left: 21.5%;
+  right: 21.5%;
+  top: 24%;
+  bottom: 27%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9em;
+  text-align: center;
+  font-family: var(--serif);
+  color: var(--card-ink, var(--deck-gold));
+}
+
+.copy .name {
+  font-size: 6cqw;
+  letter-spacing: 0.08em;
+  line-height: 1.12;
+}
+
+.copy .motto {
+  font-family: var(--sans);
+  font-size: 3.1cqw;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--card-ink, var(--deck-gold)) 70%, transparent);
+  margin-top: 0.5em;
+}
+
+.copy .card-text {
+  font-size: 5cqw;
+  line-height: 1.35;
+  color: color-mix(in srgb, var(--card-ink, var(--deck-gold)) 88%, transparent);
+}
+
+.numeral {
+  font-size: 0.64em;
+  letter-spacing: 0.08em;
+  opacity: 0.85;
+}
+
+/* --- разворот карты --- */
+
+.dviewer {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: calc(16px + var(--sat)) 16px calc(16px + var(--sab));
+  background: rgba(4, 7, 18, 0.9);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.dviewer .dslot {
+  width: min(86vw, calc((100svh - 150px) / 1.5), 420px);
+}
+
+.dhint {
+  color: var(--faint);
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.dclose {
+  position: absolute;
+  top: calc(10px + var(--sat));
+  right: 12px;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dcard {
+    transition-duration: 1ms;
+  }
+}
+
+/* --- во весь экран --------------------------------------------------------
+   Включается только когда Telegram подтвердил полноэкранный режим: класс
+   ставится из кода по событию, а не угадывается по ширине окна. */
+
+html.fullscreen {
+  --sat: calc(
+    var(--tg-content-safe-area-inset-top, 0px) + var(--tg-safe-area-inset-top, 0px) + 8px
+  );
+  --sab: calc(var(--tg-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 4px);
+}
+
+/* Кнопки Telegram занимают правый верхний угол: заголовок к ним не лезет */
+html.fullscreen .topbar {
+  padding-right: 96px;
+}
+
+html.fullscreen .dclose {
+  top: calc(10px + var(--sat));
 }
