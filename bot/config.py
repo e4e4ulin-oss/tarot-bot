@@ -56,6 +56,17 @@ class Settings(BaseSettings):
         default="https://e4e4ulin-oss.github.io/tarot-bot/", alias="MINIAPP_URL"
     )
 
+    # Свой сервер для мини-приложения. Наружу его выставляет nginx: он же
+    # отдаёт статику и проксирует /api, поэтому слушаем только localhost.
+    # Порт по умолчанию 8082: 8081 на этом сервере занят другой службой.
+    web_enabled: bool = Field(default=False, alias="WEB_ENABLED")
+    web_host: str = Field(default="127.0.0.1", alias="WEB_HOST")
+    web_port: int = Field(default=8082, alias="WEB_PORT")
+    # Разработка без Telegram: подписи взять неоткуда, поэтому запросы с
+    # localhost считаются этим пользователем. На сервере не задаётся — без
+    # номера обход не включается, и подпись проверяется как обычно.
+    web_dev_user: int = Field(default=0, alias="WEB_DEV_USER")
+
     # --- Языковая модель ---
     # Любой OpenAI-совместимый провайдер: xAI, Groq, Google Gemini, OpenRouter, Cerebras.
     # Имена XAI_*/GROK_* оставлены ради совместимости с уже настроенными сервисами.
@@ -139,6 +150,8 @@ class Settings(BaseSettings):
         "max_question_length",
         "send_card_images",
         "reversed_chance",
+        "web_enabled",
+        "web_port",
         mode="before",
     )
     @classmethod

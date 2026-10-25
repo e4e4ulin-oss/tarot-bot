@@ -17,7 +17,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from .. import promo as promo_rules
-from .. import texts
+from .. import referrals, texts
 from ..access import check as check_access
 from ..config import Settings
 from ..db import Repo
@@ -58,6 +58,20 @@ async def cb_invite(call: CallbackQuery, repo: Repo, settings: Settings) -> None
     if isinstance(call.message, Message):
         await show_invite(call.message, repo, settings, call.from_user.id)
     await call.answer()
+
+
+async def greet_guest(
+    message: Message, settings: Settings, repo: Repo, payload: str | None
+) -> None:
+    """Запоминает пригласившего и сообщает гостю о подарке.
+
+    Зовётся из обоих входов: /start ведёт в приложение, когда оно настроено, и
+    показывает старое меню, когда нет. Ссылка должна работать в обоих случаях —
+    человек, пришедший по приглашению, не обязан знать, какой у бота режим.
+    """
+    joined = await referrals.join(repo, settings, message.chat.id, payload)
+    if joined is not None and joined.welcome:
+        await message.answer(texts.INVITE_WELCOME.format(welcome=joined.welcome))
 
 
 async def tell_the_inviter(message: Message, inviter_id: int, bonus: int) -> None:

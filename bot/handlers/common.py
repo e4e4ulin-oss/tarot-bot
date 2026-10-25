@@ -7,12 +7,13 @@ from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from .. import analytics, referrals, texts
+from .. import analytics, texts
 from ..config import Settings
 from ..db import Repo
 from ..keyboards import back_to_menu, main_menu
 from ..tarot import SPREADS, deserialize
 from ..utils import fmt_date
+from .invite import greet_guest
 
 router = Router(name="common")
 # Подключается последним: ловит всё, что не подошло ни одному сценарию.
@@ -42,9 +43,7 @@ async def cmd_start(
 
     # Хвост ссылки говорит, кто привёл человека. Подарок выдаётся сразу: это
     # первое, что он здесь видит, и оно должно быть приятным
-    joined = await referrals.join(repo, settings, message.chat.id, command.args)
-    if joined is not None and joined.welcome:
-        await message.answer(texts.INVITE_WELCOME.format(welcome=joined.welcome))
+    await greet_guest(message, settings, repo, command.args)
 
     await show_main_menu(message, settings)
 

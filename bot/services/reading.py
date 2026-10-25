@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .. import analytics
+from .. import analytics, referrals
 from ..access import Access
 from ..access import check as check_access
 from ..access import spend as spend_access
@@ -38,6 +38,16 @@ class Refused:
     limit: int = 0
 
     allowed = False
+
+
+@dataclass(frozen=True)
+class Finished:
+    """Расклад состоялся: текст готов, оплата списана, награды розданы."""
+
+    interpretation: Interpretation
+    # Кому и сколько начислено за приглашение — сообщить об этом умеет только
+    # тот, кто позвал: у чата есть переписка, у приложения — бот под рукой
+    rewarded: tuple[int, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -92,8 +102,14 @@ async def finish(
     spread: Spread,
     question: str | None,
     started: Started,
-) -> Interpretation:
-    """Пишет разбор, сохраняет расклад и только теперь списывает оплату."""
+    settings: Settings | None = None,
+) -> Finished:
+    """Пишет разбор, сохраняет расклад и только теперь списывает оплату.
+
+    Здесь же начисляется награда пригласившему: первый расклад приглашённого
+    бывает один, и платить за него должно одно место — иначе чат и приложение
+    заплатят каждый свой раз.
+    """
     about = describe(await repo.get_user(user_id))
     result = await interpreter.interpret(spread, started.drawn, question, about=about)
 
@@ -108,4 +124,8 @@ async def finish(
     await repo.log_event(user_id, analytics.AUTO_READING, spread.key)
     # Списываем только теперь: если расклад не состоялся, оплата остаётся
     await spend_access(repo, started.access)
-    return result
+
+    rewarded = None
+    if settings is not None:
+        rewarded = await referrals.reward(repo, settings, user_id)
+    return Finished(interpretation=result, rewarded=rewarded)

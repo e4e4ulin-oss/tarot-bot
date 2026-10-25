@@ -125,3 +125,35 @@ async def test_the_bonus_lengthens_the_free_stretch(repo):
     await repo.add_bonus(HOST, 2)
     access = await check(repo, settings, HOST)
     assert access.allowed and access.free_left == 2
+
+
+@pytest.mark.asyncio
+async def test_the_link_is_read_before_the_app_opens(repo):
+    """Бот стал дверью в приложение, и /start теперь перехватывает дверь.
+
+    Если бы приглашение читал только старый сценарий, ссылка перестала бы
+    работать ровно в тот день, когда приложению задали адрес.
+    """
+    import inspect
+
+    from bot.handlers import shortcuts
+
+    source = inspect.getsource(shortcuts.cmd_start)
+    assert "greet_guest" in source
+    # И прочитать его нужно до того, как человек уйдёт в приложение
+    assert source.index("greet_guest") < source.index("app_url(settings)")
+
+
+@pytest.mark.asyncio
+async def test_the_reward_is_paid_by_one_place_only(repo):
+    """Чат и приложение завершают расклад одним кодом — платить должен он."""
+    import inspect
+
+    from bot.services import reading
+
+    assert "referrals.reward" in inspect.getsource(reading.finish)
+    for other in ("bot/handlers/auto.py", "bot/api/app.py"):
+        from pathlib import Path
+
+        text = Path(__file__).resolve().parents[1].joinpath(other).read_text(encoding="utf-8")
+        assert "referrals.reward" not in text, f"{other} платит во второй раз"

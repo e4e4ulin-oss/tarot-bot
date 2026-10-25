@@ -180,10 +180,21 @@ async def feed(dp, bot, event, update_id: int = 1) -> None:
 
 
 @pytest.mark.asyncio(loop_scope="module")
-async def test_start_shows_menu(env):
+async def test_start_opens_the_app(env):
+    """Бот стал дверью: на /start он подаёт кнопку приложения, а не меню."""
     dp, bot, session, _ = env
     await feed(dp, bot, make_message("/start", chat_id=1001))
-    assert any("Авторский разбор" in text for text in session.texts())
+
+    web_apps = [
+        button.web_app.url
+        for call in session.methods("SendMessage")
+        if call.reply_markup
+        for row in call.reply_markup.inline_keyboard
+        for button in row
+        if button.web_app
+    ]
+    assert web_apps, "в ответе на /start нет кнопки приложения"
+    assert web_apps[0].startswith("https://")
 
 
 @pytest.mark.asyncio(loop_scope="module")
@@ -892,20 +903,24 @@ async def test_subscription_turns_on_and_off(env):
 
 
 @pytest.mark.asyncio(loop_scope="module")
-async def test_main_menu_offers_the_daily_card(env):
+async def test_daily_command_leads_to_the_app(env):
+    """Выученные команды не ломаются: /daily открывает свой экран приложения."""
     dp, bot, session, _ = env
 
     session.clear()
-    await feed(dp, bot, make_message("/start", chat_id=1503), 1)
+    await feed(dp, bot, make_message("/daily", chat_id=1503), 1)
 
-    buttons = [
-        button.callback_data
+    opened = [
+        button.web_app.url
         for call in session.methods("SendMessage")
         if call.reply_markup
         for row in call.reply_markup.inline_keyboard
         for button in row
+        if button.web_app
     ]
-    assert "daily:open" in buttons
+    assert opened, "/daily не предложил приложение"
+    # Экран передаётся якорем: приложение открывает карту дня сразу
+    assert opened[0].endswith("#daily")
 
 
 @pytest.mark.asyncio(loop_scope="module")

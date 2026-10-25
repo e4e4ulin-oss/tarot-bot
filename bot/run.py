@@ -13,6 +13,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand
 from pydantic import ValidationError
 
+from .api import create_app, serve
 from .config import Settings, describe_missing_settings, get_settings
 from .db import create_engine, create_session_factory, init_models
 from .handlers import build_router
@@ -28,11 +29,13 @@ from .tenants import active_tenants, ensure_default, settings_for
 
 logger = logging.getLogger(__name__)
 
+# Команды остались теми же, которые люди выучили, — но каждая открывает
+# свой экран приложения, а не ведёт в переписку.
 COMMANDS = [
-    BotCommand(command="start", description="Меню"),
+    BotCommand(command="start", description="Открыть приложение"),
     BotCommand(command="daily", description="Карта дня"),
     BotCommand(command="deck", description="Колода целиком"),
-    BotCommand(command="profile", description="Личный кабинет"),
+    BotCommand(command="profile", description="Кабинет"),
     BotCommand(command="invite", description="Пригласить друга"),
     BotCommand(command="promo", description="Ввести промокод"),
     BotCommand(command="chart", description="Натальная карта"),
@@ -119,8 +122,39 @@ async def main() -> None:
     ]
     dp = build_dispatcher(settings, interpreter, session_factory)
 
+    async def tenant_tokens() -> dict[int, str]:
+        """Токены арендаторов: ими проверяется подпись мини-приложения."""
+        async with session_factory() as session:
+            return {item.id: item.bot_token for item in await active_tenants(session)}
+
+    async def tenant_brand(tenant_id: int) -> Settings:
+        """Настройки арендатора: имя автора, цены, лимиты — у каждого свои."""
+        async with session_factory() as session:
+            for item in await active_tenants(session):
+                if item.id == tenant_id:
+                    return settings_for(item, settings)
+        return settings
+
+    by_tenant = dict(zip([tenant.id for tenant in tenants], bots, strict=True))
+
+    async def tenant_bot(tenant_id: int) -> Bot | None:
+        """Бот арендатора: им приложение шлёт заявки автору и счета клиенту."""
+        return by_tenant.get(tenant_id)
+
+    runner = None
     tasks: list[asyncio.Task] = []
     try:
+        if settings.web_enabled:
+            app = create_app(
+                settings,
+                session_factory,
+                tenant_tokens,
+                tenant_brand,
+                interpreter,
+                tenant_bot,
+            )
+            runner = await serve(app, settings.web_host, settings.web_port)
+
         for bot, tenant in zip(bots, tenants, strict=True):
             await bot.set_my_commands(COMMANDS)
             await bot.delete_webhook(drop_pending_updates=True)
@@ -142,6 +176,8 @@ async def main() -> None:
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task
+        if runner is not None:
+            await runner.cleanup()
         await grok.close()
         for bot in bots:
             await bot.session.close()

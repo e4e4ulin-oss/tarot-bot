@@ -4,10 +4,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-# Значения по умолчанию, чтобы Settings собирался в тестах без реального .env
-os.environ.setdefault("BOT_TOKEN", "test:token")
-os.environ.setdefault("ADMIN_CHAT_ID", "-100123")
-os.environ.setdefault("ADMIN_IDS", "1,2")
+# Настройки тестов, а не машины, на которой они идут. Именно значения, а не
+# «если не задано»: на сервере и в контейнере разработки BOT_TOKEN задан
+# по-настоящему, и подписанный им запрос не совпадал с подписью теста —
+# проверки мини-приложения падали там, где код в порядке.
+os.environ["BOT_TOKEN"] = "test:token"
+os.environ["ADMIN_CHAT_ID"] = "-100123"
+os.environ["ADMIN_IDS"] = "1,2"
 
 
 import pytest

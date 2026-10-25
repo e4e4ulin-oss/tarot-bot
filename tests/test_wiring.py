@@ -21,6 +21,8 @@ def _message(chat_id: int, user_id: int) -> Message:
 
 def test_router_order_keeps_fallback_last():
     assert [router.name for router in ROUTERS] == [
+        # Ярлыки первыми: команда открывает приложение, а не старый сценарий
+        "shortcuts",
         "common",
         "admin",
         "daily",
@@ -226,7 +228,9 @@ def test_the_page_passes_the_stamp_on_to_its_files():
     """Метка в адресе бессмысленна, если карточки грузятся прежними."""
     from pathlib import Path
 
-    page = Path(__file__).resolve().parents[1] / "miniapp" / "index.html"
+    # Колода теперь отдельная страница: index.html занят оболочкой приложения,
+    # а метка версии нужна именно там, где грузятся 78 картинок
+    page = Path(__file__).resolve().parents[1] / "miniapp" / "deck.html"
     text = page.read_text(encoding="utf-8")
 
     assert "const V = STAMP" in text
