@@ -157,35 +157,7 @@
     },
 
     async spread() {
-      const body = $("#spread-body");
-      try {
-        const data = config || (await loadConfig());
-        body.innerHTML = data.spreads
-          .map(
-            (s) => `
-            <div class="card tap" data-spread="${esc(s.key)}">
-              <h3>${esc(s.title)}</h3>
-              <p>${esc(s.subtitle)}</p>
-              <p class="note">${s.size} ${plural(s.size, "карта", "карты", "карт")}</p>
-            </div>`
-          )
-          .join("");
-        body.querySelectorAll("[data-spread]").forEach((node) =>
-          node.addEventListener("click", () => {
-            tap();
-            // Экран вопроса и сама тасовка — следующий шаг переезда
-            if (tg && tg.showPopup) {
-              tg.showPopup({
-                title: "Скоро",
-                message: "Расклад переезжает из бота следующим шагом.",
-                buttons: [{ type: "ok" }],
-              });
-            }
-          })
-        );
-      } catch (err) {
-        fail(body, err);
-      }
+      await spreadList();
     },
 
     async author() {
@@ -263,6 +235,239 @@
       }
     },
   };
+
+  /* --- расклад: раскладка → вопрос → число → карты → разбор ---------------
+     Четыре шага живут в одном экране, потому что это один разговор: уйти
+     на вкладку и вернуться значит начать заново. */
+
+  let flow = null;
+
+  const backLink = (label) =>
+    `<button class="back-link" id="flow-back">
+       <svg><use href="assets/icons.svg#i-back"></use></svg>${esc(label)}
+     </button>`;
+
+  async function spreadList() {
+    const body = $("#spread-body");
+    flow = null;
+    try {
+      const data = config || (await loadConfig());
+      body.innerHTML = data.spreads
+        .map(
+          (s) => `
+          <div class="card tap" data-spread="${esc(s.key)}">
+            <h3>${esc(s.title)}</h3>
+            <p>${esc(s.subtitle)}</p>
+            <p class="note">${s.size} ${plural(s.size, "карта", "карты", "карт")}</p>
+          </div>`
+        )
+        .join("");
+      body.querySelectorAll("[data-spread]").forEach((node) =>
+        node.addEventListener("click", () => {
+          tap();
+          const spread = data.spreads.find((s) => s.key === node.dataset.spread);
+          askQuestion(spread);
+        })
+      );
+    } catch (err) {
+      fail(body, err);
+    }
+  }
+
+  function askQuestion(spread) {
+    const body = $("#spread-body");
+    flow = { spread, question: null, number: null };
+    body.innerHTML = `
+      ${backLink("К раскладкам")}
+      <h3 style="font-family:var(--serif);font-weight:500;font-size:22px;margin:0 0 4px">${esc(spread.title)}</h3>
+      <p class="lead">${esc(spread.subtitle)}</p>
+      <textarea class="field" id="flow-q" maxlength="500"
+        placeholder="${spread.yes_no ? "Вопрос, на который можно ответить «да» или «нет»" : "О чём спрашиваете? Чем точнее вопрос, тем точнее разбор"}"></textarea>
+      <button class="btn" id="flow-next">Дальше</button>
+      ${spread.yes_no ? "" : '<button class="btn ghost" id="flow-skip" style="margin-top:10px">Без вопроса</button>'}`;
+
+    $("#flow-back").addEventListener("click", () => {
+      tap();
+      spreadList();
+    });
+    $("#flow-next").addEventListener("click", () => {
+      const value = $("#flow-q").value.trim();
+      if (spread.yes_no && !value) {
+        $("#flow-q").focus();
+        return;
+      }
+      tap();
+      askNumber(value || null);
+    });
+    const skip = $("#flow-skip");
+    if (skip) {
+      skip.addEventListener("click", () => {
+        tap();
+        askNumber(null);
+      });
+    }
+  }
+
+  function askNumber(question) {
+    const body = $("#spread-body");
+    flow.question = question;
+    body.innerHTML = `
+      ${backLink("К вопросу")}
+      <h3 style="font-family:var(--serif);font-weight:500;font-size:22px;margin:0 0 4px">Назовите число</h3>
+      <p class="lead">От 1 до 99. Карты лягут под него — это ваш жест, а не случайность сервера.</p>
+      <input class="field one-line" id="flow-n" type="number" inputmode="numeric" min="1" max="99" placeholder="—">
+      <button class="btn" id="flow-go">Разложить</button>
+      <button class="btn ghost" id="flow-any" style="margin-top:10px">Пусть ляжет само</button>`;
+
+    $("#flow-back").addEventListener("click", () => {
+      tap();
+      askQuestion(flow.spread);
+    });
+    $("#flow-go").addEventListener("click", () => {
+      const value = parseInt($("#flow-n").value, 10);
+      tap("medium");
+      deal(Number.isFinite(value) ? value : 0);
+    });
+    $("#flow-any").addEventListener("click", () => {
+      tap("medium");
+      deal(0);
+    });
+  }
+
+  async function deal(number) {
+    const body = $("#spread-body");
+    // Запоминаем: если расклада не дали из-за подписки, после неё карты
+    // должны лечь под то же число, которое человек назвал
+    flow.number = number;
+    body.innerHTML = `<p class="waiting">Тасую колоду…</p>`;
+    try {
+      const data = await api("reading", {
+        method: "POST",
+        body: JSON.stringify({
+          spread: flow.spread.key,
+          question: flow.question,
+          number,
+        }),
+      });
+
+      if (!data.allowed) {
+        body.innerHTML = refusal(data);
+        bindRefusal();
+        return;
+      }
+
+      const wide = data.cards.length > 5;
+      body.innerHTML = `
+        ${backLink("К раскладкам")}
+        <h3 style="font-family:var(--serif);font-weight:500;font-size:22px;margin:0 0 4px">${esc(data.spread.title)}</h3>
+        ${data.question ? `<p class="lead">«${esc(data.question)}»</p>` : ""}
+        <div class="deal${wide ? " wide" : ""}">
+          ${data.cards
+            .map(
+              (card, index) => `
+            <div class="slot${card.reversed ? " rev" : ""}">
+              <img src="${esc(card.image)}" alt="${esc(card.name)}" loading="lazy"
+                   style="animation-delay:${index * 90}ms">
+              <b>${esc(card.name)}</b>
+              <span>${esc(card.position)}</span>
+            </div>`
+            )
+            .join("")}
+        </div>
+        <div class="card" id="flow-reading"><p class="waiting">Пишу разбор…</p></div>`;
+
+      $("#flow-back").addEventListener("click", () => {
+        tap();
+        spreadList();
+      });
+
+      // Разбор идёт отдельным запросом: модель пишет до минуты, а карты
+      // человек должен увидеть сразу
+      const slot = $("#flow-reading");
+      try {
+        const done = await api(`reading/${encodeURIComponent(data.token)}/interpretation`, {
+          method: "POST",
+        });
+        slot.innerHTML = `<div class="reading">${done.text}</div>`;
+        if (!done.ai) {
+          slot.insertAdjacentHTML(
+            "beforeend",
+            '<p class="note">Разбор собран по значениям карт: модель сейчас недоступна.</p>'
+          );
+        }
+        if (typeof done.free_left === "number") {
+          slot.insertAdjacentHTML(
+            "beforeend",
+            `<p class="note">Бесплатных раскладов осталось: ${done.free_left}</p>`
+          );
+        }
+        loaded.delete("profile");
+      } catch (err) {
+        slot.innerHTML = `<p>Разбор не дописался: ${esc(err.message)}</p>`;
+      }
+    } catch (err) {
+      fail(body, err);
+    }
+  }
+
+  function refusal(data) {
+    const texts = {
+      needs_daily: {
+        title: "Включите карту дня",
+        body: "Бесплатные расклады открыты тем, кто получает утреннюю карту. Это одно нажатие, отключить можно в любой момент.",
+        action: "Включить утреннюю карту",
+      },
+      needs_payment: {
+        title: "Бесплатные закончились",
+        body: "Вы использовали все бесплатные расклады. Следующий — платный.",
+        action: null,
+      },
+      payment_not_ready: {
+        title: "Оплата пока не подключена",
+        body: "Бесплатные расклады закончились, а приём оплаты автор ещё не настроил. Напишите ему напрямую.",
+        action: null,
+      },
+      daily_limit: {
+        title: "На сегодня хватит",
+        body: `Больше ${data.limit} раскладов в день не делаем: карты любят паузу.`,
+        action: null,
+      },
+    };
+    const item = texts[data.reason] || {
+      title: "Расклад недоступен",
+      body: "Попробуйте позже.",
+      action: null,
+    };
+    return `
+      ${backLink("К раскладкам")}
+      <div class="card">
+        <h3>${esc(item.title)}</h3>
+        <p>${esc(item.body)}</p>
+      </div>
+      ${item.action ? `<button class="btn" id="flow-fix">${esc(item.action)}</button>` : ""}`;
+  }
+
+  function bindRefusal() {
+    $("#flow-back").addEventListener("click", () => {
+      tap();
+      spreadList();
+    });
+    const fix = $("#flow-fix");
+    if (!fix) return;
+    fix.addEventListener("click", async () => {
+      fix.disabled = true;
+      tap();
+      try {
+        await api("daily/subscription", { method: "POST" });
+        loaded.delete("daily");
+        loaded.delete("profile");
+        deal(flow.number || 0);
+      } catch (err) {
+        fix.textContent = "Не получилось, попробуйте позже";
+        fix.disabled = false;
+      }
+    });
+  }
 
   function dailyCard(card, subscribed) {
     return `

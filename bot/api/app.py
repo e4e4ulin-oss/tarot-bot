@@ -12,7 +12,10 @@
 from __future__ import annotations
 
 import logging
+import secrets
+import time
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 
 from aiohttp import web
@@ -21,8 +24,11 @@ from .. import analytics
 from ..config import Settings
 from ..db import Repo
 from ..schedule import now
+from ..services import reading as reading_rules
 from ..services.daily import card_of_the_day
-from ..tarot import SPREAD_ORDER, SPREADS, DrawnCard
+from ..services.grok import GrokClient
+from ..services.interpreter import Interpreter
+from ..tarot import SPREAD_ORDER, SPREADS, DrawnCard, get_spread
 from ..tiers import tiers as author_tiers
 from .auth import AuthError, Identity, WebAppUser, init_data_from_header, verify
 
@@ -32,6 +38,15 @@ logger = logging.getLogger(__name__)
 IDENTITY = web.AppKey("identity", Identity)
 BRAND = web.AppKey("brand", Settings)
 SESSIONS = web.AppKey("session_factory", object)
+INTERPRETER = web.AppKey("interpreter", Interpreter)
+PENDING = web.AppKey("pending", dict)
+
+# Сколько ждёт расклад, которому не заказали разбор. Человек видит карты и
+# может закрыть приложение — держать такую запись дольше незачем.
+PENDING_TTL = 15 * 60
+
+# Число, под которое ложатся карты: жест, а не счёт
+NUMBER_LIMIT = 99
 
 # Эти адреса отвечают без подписи: по ним приложение решает, что показывать
 # на экране входа, ещё не зная, кто перед ним.
@@ -200,7 +215,10 @@ async def handle_me(request: web.Request) -> web.Response:
                 {
                     "id": item.id,
                     "mode": item.mode.value if hasattr(item.mode, "value") else str(item.mode),
-                    "spread": item.spread,
+                    "spread": item.spread_key,
+                    "title": SPREADS[item.spread_key].title
+                    if item.spread_key in SPREADS
+                    else item.spread_key,
                     "question": item.question,
                     "created_at": item.created_at.isoformat() if item.created_at else None,
                 }
@@ -287,11 +305,132 @@ async def handle_daily_subscription(request: web.Request) -> web.Response:
     return json_ok({"subscribed": not subscribed})
 
 
+@dataclass
+class Pending:
+    """Расклад, который лёг, но разбор к нему ещё не заказан."""
+
+    started: reading_rules.Started
+    spread_key: str
+    question: str | None
+    user_id: int
+    tenant_id: int
+    at: float
+
+
+def sweep(pending: dict[str, Pending]) -> None:
+    """Выбрасывает забытые расклады: иначе словарь растёт всю жизнь процесса."""
+    edge = time.time() - PENDING_TTL
+    for token in [key for key, item in pending.items() if item.at < edge]:
+        pending.pop(token, None)
+
+
+async def handle_reading_start(request: web.Request) -> web.Response:
+    """Карты ложатся. Разбор пишется следующим запросом — он долгий."""
+    identity: Identity = request[IDENTITY]
+    settings: Settings = request[BRAND]
+    session_factory = request.app[SESSIONS]
+
+    try:
+        payload = await request.json()
+    except Exception:
+        return json_error("Не разобрал запрос")
+
+    key = str(payload.get("spread") or "")
+    if key not in SPREADS:
+        return json_error("Нет такой раскладки")
+    spread = get_spread(key)
+
+    question = (payload.get("question") or "").strip() or None
+    if question and len(question) > settings.max_question_length:
+        return json_error(f"Вопрос длиннее {settings.max_question_length} символов")
+    if spread.yes_no and not question:
+        return json_error("Для ответа «да или нет» нужен вопрос")
+
+    try:
+        number = int(payload.get("number") or 0)
+    except (TypeError, ValueError):
+        return json_error("Число не похоже на число")
+    if not 1 <= number <= NUMBER_LIMIT:
+        number = secrets.randbelow(NUMBER_LIMIT) + 1
+
+    async with session_factory() as session:
+        repo = Repo(session, tenant_id=identity.tenant_id)
+        await repo.upsert_user(identity.user.id, identity.user.username, identity.user.first_name)
+        await repo.log_event(identity.user.id, analytics.AUTO_OPEN)
+        decision = await reading_rules.start(
+            repo, settings, identity.user.id, spread, question, number=number
+        )
+
+    if not decision.allowed:
+        # Отказ — это не ошибка: приложению нужно показать, чего не хватает
+        return json_ok(
+            {
+                "allowed": False,
+                "reason": decision.reason,
+                "free_left": decision.free_left,
+                "limit": decision.limit,
+            }
+        )
+
+    token = secrets.token_urlsafe(16)
+    pending: dict[str, Pending] = request.app[PENDING]
+    sweep(pending)
+    pending[token] = Pending(
+        started=decision,
+        spread_key=spread.key,
+        question=question,
+        user_id=identity.user.id,
+        tenant_id=identity.tenant_id,
+        at=time.time(),
+    )
+
+    return json_ok(
+        {
+            "allowed": True,
+            "token": token,
+            "spread": spread_payload(spread.key),
+            "number": number,
+            "question": question,
+            "cards": [{**card_payload(card), "position": card.position} for card in decision.drawn],
+        }
+    )
+
+
+async def handle_reading_finish(request: web.Request) -> web.Response:
+    """Разбор. Может писаться до минуты, поэтому отдельным запросом."""
+    identity: Identity = request[IDENTITY]
+    session_factory = request.app[SESSIONS]
+    interpreter: Interpreter = request.app[INTERPRETER]
+    pending: dict[str, Pending] = request.app[PENDING]
+
+    token = request.match_info["token"]
+    item = pending.get(token)
+    if item is None:
+        return json_error("Расклад устарел, разложите заново", 404, "expired")
+    # Чужой расклад по чужому ключу забрать нельзя
+    if item.user_id != identity.user.id or item.tenant_id != identity.tenant_id:
+        return json_error("Это не ваш расклад", 403, "forbidden")
+
+    spread = get_spread(item.spread_key)
+    async with session_factory() as session:
+        repo = Repo(session, tenant_id=identity.tenant_id)
+        result = await reading_rules.finish(
+            repo, interpreter, identity.user.id, spread, item.question, item.started
+        )
+        used = await repo.count_auto_readings(identity.user.id)
+        settings: Settings = request[BRAND]
+        free_left = max(0, settings.free_auto_readings - used)
+
+    pending.pop(token, None)
+    return json_ok({"text": result.text, "ai": result.ai_used, "free_left": free_left})
+
+
 def create_app(
     settings: Settings,
     session_factory,
     tokens: TokensProvider,
     brands: BrandProvider,
+    interpreter: Interpreter | None = None,
 ) -> web.Application:
     app = web.Application(
         middlewares=[errors_middleware, auth_middleware(tokens, brands)],
@@ -299,6 +438,14 @@ def create_app(
     )
     app[SESSIONS] = session_factory
     app[BRAND] = settings
+    # Без ключа толкователь отдаёт базовые значения карт — приложение работает,
+    # просто разбор получается суше
+    app[INTERPRETER] = interpreter or Interpreter(
+        GrokClient(settings.ai_api_key, base_url=settings.ai_base_url, model=settings.ai_model),
+        author_name=settings.author_name,
+        deadline=settings.grok_deadline,
+    )
+    app[PENDING] = {}
 
     app.router.add_get("/api/health", handle_health)
     app.router.add_get("/api/config", handle_config)
@@ -307,6 +454,8 @@ def create_app(
     app.router.add_get("/api/daily", handle_daily_get)
     app.router.add_post("/api/daily", handle_daily_draw)
     app.router.add_post("/api/daily/subscription", handle_daily_subscription)
+    app.router.add_post("/api/reading", handle_reading_start)
+    app.router.add_post("/api/reading/{token}/interpretation", handle_reading_finish)
     return app
 
 

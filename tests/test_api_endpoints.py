@@ -40,6 +40,11 @@ def auth(token: str = TOKEN, **kwargs) -> dict[str, str]:
     return {"Authorization": f"tma {make_init_data(token, **kwargs)}"}
 
 
+async def subscribe(client, user_id: int) -> None:
+    """Бесплатные расклады положены подписчикам утренней карты — это правило бота."""
+    await client.post("/api/daily/subscription", headers=auth(user_id=user_id))
+
+
 @pytest.mark.asyncio
 async def test_health_is_open(client):
     res = await client.get("/api/health")
@@ -116,3 +121,108 @@ async def test_subscription_toggles(client):
     assert on["subscribed"] is True
     off = await (await client.post("/api/daily/subscription", headers=auth(user_id=9))).json()
     assert off["subscribed"] is False
+
+
+@pytest.mark.asyncio
+async def test_reading_start_returns_cards_for_the_spread(client):
+    await subscribe(client, 21)
+    res = await client.post(
+        "/api/reading",
+        headers=auth(user_id=21),
+        json={"spread": "ptf", "question": "что с работой", "number": 7},
+    )
+    assert res.status == 200
+    data = await res.json()
+    assert data["allowed"] is True
+    assert len(data["cards"]) == 3
+    # Позиции приходят вместе с картами: без них расклад не прочитать
+    assert [card["position"] for card in data["cards"]] == [
+        "Прошлое",
+        "Настоящее",
+        "Будущее",
+    ]
+    assert data["token"]
+
+
+@pytest.mark.asyncio
+async def test_reading_is_repeatable_for_the_same_number(client):
+    await subscribe(client, 22)
+    body = {"spread": "sit", "question": "одинаково ли", "number": 13}
+    first = await (await client.post("/api/reading", headers=auth(user_id=22), json=body)).json()
+    second = await (await client.post("/api/reading", headers=auth(user_id=22), json=body)).json()
+    # Карты ложатся под названное число, а не под случайность сервера
+    assert [c["id"] for c in first["cards"]] == [c["id"] for c in second["cards"]]
+
+
+@pytest.mark.asyncio
+async def test_reading_finish_writes_interpretation_and_history(client):
+    await subscribe(client, 23)
+    started = await (
+        await client.post(
+            "/api/reading", headers=auth(user_id=23), json={"spread": "day", "number": 3}
+        )
+    ).json()
+    res = await client.post(
+        f"/api/reading/{started['token']}/interpretation", headers=auth(user_id=23)
+    )
+    assert res.status == 200
+    done = await res.json()
+    assert done["text"]
+    # Бесплатных стало меньше ровно на этот расклад
+    assert done["free_left"] == 2
+
+    me = await (await client.get("/api/me", headers=auth(user_id=23))).json()
+    assert len(me["history"]) == 1
+    assert me["history"][0]["spread"] == "day"
+
+
+@pytest.mark.asyncio
+async def test_interpretation_of_a_foreign_token_is_refused(client):
+    await subscribe(client, 24)
+    started = await (
+        await client.post(
+            "/api/reading", headers=auth(user_id=24), json={"spread": "day", "number": 1}
+        )
+    ).json()
+    res = await client.post(
+        f"/api/reading/{started['token']}/interpretation", headers=auth(user_id=25)
+    )
+    assert res.status == 403
+
+
+@pytest.mark.asyncio
+async def test_unknown_token_is_expired(client):
+    res = await client.post("/api/reading/nothing/interpretation", headers=auth(user_id=26))
+    assert res.status == 404
+
+
+@pytest.mark.asyncio
+async def test_yes_no_spread_demands_a_question(client):
+    res = await client.post(
+        "/api/reading", headers=auth(user_id=27), json={"spread": "yes_no", "number": 5}
+    )
+    assert res.status == 400
+
+
+@pytest.mark.asyncio
+async def test_free_readings_run_out(client):
+    await subscribe(client, 28)
+    for _ in range(3):
+        started = await (
+            await client.post(
+                "/api/reading", headers=auth(user_id=28), json={"spread": "day", "number": 2}
+            )
+        ).json()
+        assert started["allowed"] is True
+        await client.post(
+            f"/api/reading/{started['token']}/interpretation", headers=auth(user_id=28)
+        )
+
+    refused = await (
+        await client.post(
+            "/api/reading", headers=auth(user_id=28), json={"spread": "day", "number": 2}
+        )
+    ).json()
+    # Отказ приходит обычным ответом: приложению надо показать, чего не хватает
+    assert refused["allowed"] is False
+    assert refused["reason"] in ("needs_payment", "payment_not_ready", "needs_daily")

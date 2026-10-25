@@ -135,7 +135,7 @@ async def main() -> None:
     tasks: list[asyncio.Task] = []
     try:
         if settings.web_enabled:
-            app = create_app(settings, session_factory, tenant_tokens, tenant_brand)
+            app = create_app(settings, session_factory, tenant_tokens, tenant_brand, interpreter)
             runner = await serve(app, settings.web_host, settings.web_port)
 
         for bot, tenant in zip(bots, tenants, strict=True):
