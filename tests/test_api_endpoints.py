@@ -302,9 +302,78 @@ async def test_forecast_follows_the_chart(client):
     empty = await (await client.get("/api/forecast", headers=auth(user_id=36))).json()
     assert empty["ready"] is False
 
-    await client.put(
-        "/api/profile", headers=auth(user_id=36), json={"birth_date": "25.07.1992"}
-    )
+    await client.put("/api/profile", headers=auth(user_id=36), json={"birth_date": "25.07.1992"})
     data = await (await client.get("/api/forecast", headers=auth(user_id=36))).json()
     assert data["ready"] is True
     assert isinstance(data["transits"], list)
+
+
+@pytest.mark.asyncio
+async def test_order_is_created_and_blocks_a_second_one(client):
+    res = await client.post(
+        "/api/order",
+        headers=auth(user_id=41),
+        json={"tier": "short", "question": "что делать с переездом", "contact": "@diana"},
+    )
+    assert res.status == 200
+    first = await res.json()
+    assert first["created"] is True
+    assert first["order"]["id"]
+
+    again = await (
+        await client.post(
+            "/api/order", headers=auth(user_id=41), json={"question": "ещё один вопрос"}
+        )
+    ).json()
+    # Вторую заявку не принимаем, пока первая в работе
+    assert again["created"] is False
+    assert again["reason"] == "already_open"
+    assert again["order"]["id"] == first["order"]["id"]
+
+
+@pytest.mark.asyncio
+async def test_order_needs_a_question(client):
+    res = await client.post("/api/order", headers=auth(user_id=42), json={"tier": "short"})
+    assert res.status == 400
+
+
+@pytest.mark.asyncio
+async def test_unknown_tier_is_refused(client):
+    res = await client.post(
+        "/api/order", headers=auth(user_id=43), json={"question": "вопрос", "tier": "royal"}
+    )
+    assert res.status == 400
+
+
+@pytest.mark.asyncio
+async def test_order_can_be_cancelled_while_untouched(client):
+    created = await (
+        await client.post("/api/order", headers=auth(user_id=44), json={"question": "вопрос"})
+    ).json()
+    order_id = created["order"]["id"]
+
+    res = await client.delete(f"/api/order/{order_id}", headers=auth(user_id=44))
+    assert res.status == 200
+
+    # Отменённая заявка больше не держит место: можно подать новую
+    second = await (
+        await client.post("/api/order", headers=auth(user_id=44), json={"question": "другой"})
+    ).json()
+    assert second["created"] is True
+
+
+@pytest.mark.asyncio
+async def test_foreign_order_cannot_be_cancelled(client):
+    created = await (
+        await client.post("/api/order", headers=auth(user_id=45), json={"question": "вопрос"})
+    ).json()
+    res = await client.delete(f"/api/order/{created['order']['id']}", headers=auth(user_id=46))
+    assert res.status == 404
+
+
+@pytest.mark.asyncio
+async def test_invoice_says_when_payments_are_not_set_up(client):
+    res = await client.post("/api/invoice", headers=auth(user_id=47), json={"kind": "auto"})
+    # Токена продавца в тестовых настройках нет — и приложение должно это объяснить
+    assert res.status == 409
+    assert (await res.json())["error"] == "payment_not_ready"

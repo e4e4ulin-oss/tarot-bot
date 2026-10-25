@@ -19,12 +19,17 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from aiogram import Bot
+from aiogram.types import LabeledPrice
 from aiohttp import web
 
-from .. import analytics, geo
+from .. import analytics, geo, texts
 from .. import profile as profile_parse
 from ..config import Settings
 from ..db import Repo
+from ..db.models import OrderStatus
+from ..handlers.author import notify_admin_new_order
+from ..handlers.payments import PAYLOAD_AUTO, PAYLOAD_NATAL
 from ..natal import forecast as natal_forecast
 from ..natal import full as natal_full
 from ..natal import timeline as natal_timeline
@@ -35,6 +40,7 @@ from ..services.daily import card_of_the_day
 from ..services.grok import GrokClient, GrokError
 from ..services.interpreter import Interpreter
 from ..tarot import SPREAD_ORDER, SPREADS, DrawnCard, get_spread
+from ..tiers import find_tier
 from ..tiers import tiers as author_tiers
 from .auth import AuthError, Identity, WebAppUser, init_data_from_header, verify
 
@@ -46,6 +52,7 @@ BRAND = web.AppKey("brand", Settings)
 SESSIONS = web.AppKey("session_factory", object)
 INTERPRETER = web.AppKey("interpreter", Interpreter)
 PENDING = web.AppKey("pending", dict)
+BOTS = web.AppKey("bots", object)
 
 # Сколько ждёт расклад, которому не заказали разбор. Человек видит карты и
 # может закрыть приложение — держать такую запись дольше незачем.
@@ -60,6 +67,7 @@ PUBLIC_PATHS = frozenset({"/api/health", "/api/config"})
 
 TokensProvider = Callable[[], Awaitable[dict[int, str]]]
 BrandProvider = Callable[[int], Awaitable[Settings]]
+BotProvider = Callable[[int], Awaitable["Bot | None"]]
 
 
 def json_ok(payload: dict[str, Any], status: int = 200) -> web.Response:
@@ -496,6 +504,141 @@ async def handle_forecast_text(request: web.Request) -> web.Response:
         return json_ok({"text": None, "quiet": False, "unavailable": True})
 
 
+async def handle_order_create(request: web.Request) -> web.Response:
+    """Заявка живому тарологу. Одна открытая на человека — как и в боте."""
+    identity: Identity = request[IDENTITY]
+    settings: Settings = request[BRAND]
+    session_factory = request.app[SESSIONS]
+    bots: BotProvider = request.app[BOTS]
+
+    try:
+        payload = await request.json()
+    except Exception:
+        return json_error("Не разобрал запрос")
+
+    question = (payload.get("question") or "").strip()
+    if not question:
+        return json_error("Без вопроса заявку не отправить")
+    if len(question) > settings.max_question_length:
+        return json_error(f"Вопрос длиннее {settings.max_question_length} символов")
+
+    tier_key = (payload.get("tier") or "").strip() or None
+    if tier_key and find_tier(settings, tier_key) is None:
+        return json_error("Нет такого уровня разбора")
+
+    topic = (payload.get("topic") or "").strip() or None
+    contact = (payload.get("contact") or "").strip() or None
+
+    async with session_factory() as session:
+        repo = Repo(session, tenant_id=identity.tenant_id)
+        await repo.upsert_user(identity.user.id, identity.user.username, identity.user.first_name)
+
+        existing = await repo.open_order_for_user(identity.user.id)
+        if existing is not None:
+            return json_ok(
+                {
+                    "created": False,
+                    "reason": "already_open",
+                    "order": {
+                        "id": existing.id,
+                        "created_at": existing.created_at.isoformat()
+                        if existing.created_at
+                        else None,
+                    },
+                }
+            )
+
+        order = await repo.create_order(
+            user_id=identity.user.id,
+            question=question,
+            topic=topic,
+            contact=contact,
+            tier=tier_key,
+        )
+        await repo.log_event(identity.user.id, analytics.ORDER_SENT, order.tier)
+
+        # Заявку должен увидеть автор, а не только база: уведомление уходит
+        # тем же ботом, в котором открыто приложение
+        bot = await bots(identity.tenant_id)
+        if bot is not None:
+            full_name = " ".join(
+                part for part in (identity.user.first_name, identity.user.last_name) if part
+            )
+            try:
+                await notify_admin_new_order(
+                    bot, settings, repo, order, full_name, identity.user.username
+                )
+            except Exception:
+                logger.exception("заявка %s создана, но автору не ушла", order.id)
+
+    tier = find_tier(settings, order.tier)
+    return json_ok(
+        {
+            "created": True,
+            "order": {"id": order.id, "tier": order.tier},
+            "hours": tier.hours if tier else None,
+            "author": settings.author_name,
+        }
+    )
+
+
+async def handle_order_cancel(request: web.Request) -> web.Response:
+    """Отмена своей заявки, пока автор за неё не взялся."""
+    identity: Identity = request[IDENTITY]
+    session_factory = request.app[SESSIONS]
+
+    try:
+        order_id = int(request.match_info["order_id"])
+    except (TypeError, ValueError):
+        return json_error("Нет такой заявки", 404, "not_found")
+
+    async with session_factory() as session:
+        repo = Repo(session, tenant_id=identity.tenant_id)
+        order = await repo.get_order(order_id)
+        if order is None or order.user_id != identity.user.id:
+            return json_error("Нет такой заявки", 404, "not_found")
+        if order.status != OrderStatus.NEW:
+            return json_error("Автор уже взял заявку в работу", 409, "in_progress")
+        await repo.set_order_status(order, OrderStatus.CANCELLED)
+
+    return json_ok({"cancelled": True})
+
+
+async def handle_invoice(request: web.Request) -> web.Response:
+    """Ссылка на оплату. Открывает её само приложение — Telegram умеет это сам."""
+    identity: Identity = request[IDENTITY]
+    settings: Settings = request[BRAND]
+    bots: BotProvider = request.app[BOTS]
+
+    if not settings.payment_provider_token:
+        return json_error("Автор ещё не подключил приём оплаты", 409, "payment_not_ready")
+
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    natal = (payload.get("kind") or "auto") == "natal"
+    price = settings.natal_reading_price if natal else settings.auto_reading_price
+    title = texts.INVOICE_NATAL_TITLE if natal else texts.INVOICE_TITLE
+    description = texts.INVOICE_NATAL_DESCRIPTION if natal else texts.INVOICE_DESCRIPTION
+
+    bot = await bots(identity.tenant_id)
+    if bot is None:
+        return json_error("Бот недоступен", 503, "no_bot")
+
+    link = await bot.create_invoice_link(
+        title=title,
+        description=description,
+        payload=PAYLOAD_NATAL if natal else PAYLOAD_AUTO,
+        provider_token=settings.payment_provider_token,
+        currency=settings.payment_currency,
+        # Telegram считает сумму в копейках
+        prices=[LabeledPrice(label=title, amount=price * 100)],
+    )
+    return json_ok({"link": link, "price": price, "currency": settings.payment_currency})
+
+
 @dataclass
 class Pending:
     """Расклад, который лёг, но разбор к нему ещё не заказан."""
@@ -616,12 +759,17 @@ async def handle_reading_finish(request: web.Request) -> web.Response:
     return json_ok({"text": result.text, "ai": result.ai_used, "free_left": free_left})
 
 
+async def _no_bot(tenant_id: int) -> Bot | None:
+    return None
+
+
 def create_app(
     settings: Settings,
     session_factory,
     tokens: TokensProvider,
     brands: BrandProvider,
     interpreter: Interpreter | None = None,
+    bots: BotProvider | None = None,
 ) -> web.Application:
     app = web.Application(
         middlewares=[errors_middleware, auth_middleware(tokens, brands)],
@@ -637,6 +785,8 @@ def create_app(
         deadline=settings.grok_deadline,
     )
     app[PENDING] = {}
+    # Заявки и счета уходят через бота того же арендатора
+    app[BOTS] = bots or _no_bot
 
     app.router.add_get("/api/health", handle_health)
     app.router.add_get("/api/config", handle_config)
@@ -652,6 +802,9 @@ def create_app(
     app.router.add_get("/api/chart", handle_chart)
     app.router.add_get("/api/forecast", handle_forecast)
     app.router.add_post("/api/forecast", handle_forecast_text)
+    app.router.add_post("/api/order", handle_order_create)
+    app.router.add_delete("/api/order/{order_id}", handle_order_cancel)
+    app.router.add_post("/api/invoice", handle_invoice)
     return app
 
 

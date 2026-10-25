@@ -131,11 +131,24 @@ async def main() -> None:
                     return settings_for(item, settings)
         return settings
 
+    by_tenant = dict(zip([tenant.id for tenant in tenants], bots, strict=True))
+
+    async def tenant_bot(tenant_id: int) -> Bot | None:
+        """Бот арендатора: им приложение шлёт заявки автору и счета клиенту."""
+        return by_tenant.get(tenant_id)
+
     runner = None
     tasks: list[asyncio.Task] = []
     try:
         if settings.web_enabled:
-            app = create_app(settings, session_factory, tenant_tokens, tenant_brand, interpreter)
+            app = create_app(
+                settings,
+                session_factory,
+                tenant_tokens,
+                tenant_brand,
+                interpreter,
+                tenant_bot,
+            )
             runner = await serve(app, settings.web_host, settings.web_port)
 
         for bot, tenant in zip(bots, tenants, strict=True):

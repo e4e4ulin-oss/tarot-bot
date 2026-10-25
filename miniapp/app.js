@@ -161,30 +161,7 @@
     },
 
     async author() {
-      const body = $("#author-body");
-      try {
-        const data = config || (await loadConfig());
-        $("#author-lead").textContent = `Разбор делает ${data.author} — живой человек, а не модель.`;
-        if (!data.tiers.length) {
-          body.innerHTML = `<div class="card"><h3>Пока закрыто</h3><p>Автор не принимает заявки.</p></div>`;
-          return;
-        }
-        body.innerHTML = data.tiers
-          .map(
-            (tier) => `
-            <div class="card">
-              <h3>${esc(tier.title)} · ${tier.price} ${esc(data.currency)}</h3>
-              <p>${esc(tier.summary)}</p>
-              <ul class="note" style="margin:10px 0 0;padding-left:18px">
-                ${tier.includes.map((line) => `<li>${esc(line)}</li>`).join("")}
-              </ul>
-              <p class="note">ответ ${esc(tier.hours)} ч · уточнений: ${tier.followups}</p>
-            </div>`
-          )
-          .join("");
-      } catch (err) {
-        fail(body, err);
-      }
+      await authorView();
     },
 
     async profile() {
@@ -618,7 +595,8 @@
       needs_payment: {
         title: "Бесплатные закончились",
         body: "Вы использовали все бесплатные расклады. Следующий — платный.",
-        action: null,
+        action: "Оплатить расклад",
+        pay: true,
       },
       payment_not_ready: {
         title: "Оплата пока не подключена",
@@ -642,7 +620,8 @@
         <h3>${esc(item.title)}</h3>
         <p>${esc(item.body)}</p>
       </div>
-      ${item.action ? `<button class="btn" id="flow-fix">${esc(item.action)}</button>` : ""}`;
+      ${item.action ? `<button class="btn" id="flow-fix" data-pay="${item.pay ? 1 : 0}">${esc(item.action)}</button>` : ""}
+      <p class="note" id="flow-msg"></p>`;
   }
 
   function bindRefusal() {
@@ -656,13 +635,165 @@
       fix.disabled = true;
       tap();
       try {
+        if (fix.dataset.pay === "1") {
+          await payAndDeal();
+          return;
+        }
         await api("daily/subscription", { method: "POST" });
         loaded.delete("daily");
         loaded.delete("profile");
         deal(flow.number || 0);
       } catch (err) {
-        fix.textContent = "Не получилось, попробуйте позже";
+        $("#flow-msg").textContent = err.message;
         fix.disabled = false;
+      }
+    });
+  }
+
+  async function payAndDeal() {
+    const invoice = await api("invoice", {
+      method: "POST",
+      body: JSON.stringify({ kind: "auto" }),
+    });
+    if (!tg || !tg.openInvoice) {
+      $("#flow-msg").textContent = "Оплата открывается только внутри Telegram.";
+      $("#flow-fix").disabled = false;
+      return;
+    }
+    // Телеграм сам показывает окно оплаты и возвращает исход; деньги
+    // записывает бот, когда придёт successful_payment
+    tg.openInvoice(invoice.link, (status) => {
+      if (status === "paid") {
+        loaded.delete("profile");
+        deal(flow.number || 0);
+        return;
+      }
+      $("#flow-msg").textContent =
+        status === "failed" ? "Оплата не прошла." : "Оплата отменена.";
+      $("#flow-fix").disabled = false;
+    });
+  }
+
+  /* --- авторский разбор: уровень → вопрос → заявка ------------------------
+     Здесь человек пишет живому тарологу, а не модели, поэтому и шагов
+     меньше: выбрать глубину, сформулировать вопрос, оставить связь. */
+
+  async function authorView() {
+    const body = $("#author-body");
+    try {
+      const data = config || (await loadConfig());
+      $("#author-lead").textContent = `Разбор делает ${data.author} — живой человек, а не модель.`;
+
+      const me = await api("me");
+      if (me.open_order) {
+        authorSent(me.open_order, data);
+        return;
+      }
+
+      if (!data.tiers.length) {
+        body.innerHTML = `<div class="card"><h3>Пока закрыто</h3><p>Автор не принимает заявки.</p></div>`;
+        return;
+      }
+
+      body.innerHTML = data.tiers
+        .map(
+          (tier) => `
+          <div class="card tap" data-tier="${esc(tier.key)}">
+            <h3>${esc(tier.title)} · ${tier.price} ${esc(data.currency)}</h3>
+            <p>${esc(tier.summary)}</p>
+            <ul class="note" style="margin:10px 0 0;padding-left:18px">
+              ${tier.includes.map((line) => `<li>${esc(line)}</li>`).join("")}
+            </ul>
+            <p class="note">ответ ${esc(tier.hours)} ч · уточнений: ${tier.followups}</p>
+          </div>`
+        )
+        .join("");
+
+      body.querySelectorAll("[data-tier]").forEach((node) =>
+        node.addEventListener("click", () => {
+          tap();
+          authorForm(data.tiers.find((t) => t.key === node.dataset.tier), data);
+        })
+      );
+    } catch (err) {
+      fail(body, err);
+    }
+  }
+
+  function authorForm(tier, data) {
+    const body = $("#author-body");
+    body.innerHTML = `
+      ${backLink("К уровням", "a-back")}
+      <h3 style="font-family:var(--serif);font-weight:500;font-size:22px;margin:0 0 4px">${esc(tier.title)} · ${tier.price} ${esc(data.currency)}</h3>
+      <p class="lead">${esc(tier.summary)}. Ответ ${esc(tier.hours)} ч.</p>
+      <label class="note">Ваш вопрос</label>
+      <textarea class="field" id="a-q" maxlength="500"
+        placeholder="Опишите ситуацию: что происходит и что хотите понять"></textarea>
+      <label class="note">Как с вами связаться, если понадобится</label>
+      <input class="field one-line plain" id="a-contact" placeholder="@ник или телефон — необязательно">
+      <button class="btn" id="a-send">Отправить заявку</button>
+      <p class="note" id="a-msg"></p>`;
+
+    $("#a-back").addEventListener("click", () => {
+      tap();
+      authorView();
+    });
+
+    $("#a-send").addEventListener("click", async () => {
+      const button = $("#a-send");
+      const question = $("#a-q").value.trim();
+      if (!question) {
+        $("#a-q").focus();
+        return;
+      }
+      button.disabled = true;
+      tap("medium");
+      try {
+        const sent = await api("order", {
+          method: "POST",
+          body: JSON.stringify({
+            tier: tier.key,
+            question,
+            contact: $("#a-contact").value.trim() || null,
+          }),
+        });
+        loaded.delete("profile");
+        if (sent.created) {
+          authorSent({ id: sent.order.id, tier: sent.order.tier }, data, sent.hours);
+        } else {
+          authorSent(sent.order, data);
+        }
+      } catch (err) {
+        $("#a-msg").textContent = err.message;
+        button.disabled = false;
+      }
+    });
+  }
+
+  function authorSent(order, data, hours) {
+    const body = $("#author-body");
+    const tier = (data.tiers || []).find((t) => t.key === order.tier);
+    const deadline = hours || (tier && tier.hours);
+    body.innerHTML = `
+      <div class="card">
+        <h3>Заявка №${order.id} у автора</h3>
+        <p>${esc(data.author)} ответит${deadline ? ` в течение ${deadline} ч` : ""}. Ответ придёт сюда же, в чат с ботом.</p>
+        ${order.created_at ? `<p class="note">Отправлена ${esc(dateLabel(order.created_at))}</p>` : ""}
+      </div>
+      <button class="btn ghost" id="a-cancel">Отменить заявку</button>
+      <p class="note" id="a-msg"></p>`;
+
+    $("#a-cancel").addEventListener("click", async () => {
+      const button = $("#a-cancel");
+      button.disabled = true;
+      tap();
+      try {
+        await api(`order/${order.id}`, { method: "DELETE" });
+        loaded.delete("profile");
+        authorView();
+      } catch (err) {
+        $("#a-msg").textContent = err.message;
+        button.disabled = false;
       }
     });
   }
