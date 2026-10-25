@@ -18,7 +18,13 @@ set -euo pipefail
 DOMAIN="${1:-}"
 EMAIL="${2:-}"
 DIR="${TAROT_DIR:-/opt/tarot-bot}"
-PORT="${TAROT_WEB_PORT:-8081}"
+# Порт берём из настроек самого бота, а не из второго мнения: разойдутся —
+# nginx будет стучаться в пустоту, приложение откроется, но без данных
+PORT="${TAROT_WEB_PORT:-}"
+if [ -z "$PORT" ] && [ -f "$DIR/.env" ]; then
+  PORT="$(sed -n 's/^WEB_PORT=\([0-9]\{1,\}\).*/\1/p' "$DIR/.env" | tail -1)"
+fi
+PORT="${PORT:-8082}"  # столько же стоит по умолчанию в bot/config.py
 
 [ -n "$DOMAIN" ] || { echo "укажите имя: sudo bash deploy/web.sh ИМЯ.duckdns.org"; exit 2; }
 [ "$(id -u)" -eq 0 ] || { echo "нужно от root: sudo bash deploy/web.sh $DOMAIN"; exit 2; }

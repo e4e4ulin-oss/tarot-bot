@@ -236,3 +236,21 @@ def test_the_page_passes_the_stamp_on_to_its_files():
     assert "const V = STAMP" in text
     assert "cards/${card.id}.jpg${V}" in text
     assert "cards.json${V}" in text
+
+
+def test_the_web_script_and_the_bot_agree_on_the_port():
+    """Разойдутся — приложение откроется, а данные к нему не придут.
+
+    На работающем сервере это уже совпало руками; ломается оно у следующего,
+    кто поставит бота с нуля, и выглядит как «всё белое и ничего не грузится».
+    """
+    import re
+    from pathlib import Path
+
+    from bot.config import Settings
+
+    script = Path(__file__).resolve().parents[1] / "deploy" / "web.sh"
+    fallback = re.search(r'PORT="\$\{PORT:-(\d+)\}"', script.read_text(encoding="utf-8"))
+
+    assert fallback, "в скрипте не нашёлся порт по умолчанию"
+    assert int(fallback.group(1)) == Settings().web_port
