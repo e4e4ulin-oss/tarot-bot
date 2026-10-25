@@ -13,6 +13,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand
 from pydantic import ValidationError
 
+from .api import create_app, serve
 from .config import Settings, describe_missing_settings, get_settings
 from .db import create_engine, create_session_factory, init_models
 from .handlers import build_router
@@ -117,8 +118,26 @@ async def main() -> None:
     ]
     dp = build_dispatcher(settings, interpreter, session_factory)
 
+    async def tenant_tokens() -> dict[int, str]:
+        """Токены арендаторов: ими проверяется подпись мини-приложения."""
+        async with session_factory() as session:
+            return {item.id: item.bot_token for item in await active_tenants(session)}
+
+    async def tenant_brand(tenant_id: int) -> Settings:
+        """Настройки арендатора: имя автора, цены, лимиты — у каждого свои."""
+        async with session_factory() as session:
+            for item in await active_tenants(session):
+                if item.id == tenant_id:
+                    return settings_for(item, settings)
+        return settings
+
+    runner = None
     tasks: list[asyncio.Task] = []
     try:
+        if settings.web_enabled:
+            app = create_app(settings, session_factory, tenant_tokens, tenant_brand)
+            runner = await serve(app, settings.web_host, settings.web_port)
+
         for bot, tenant in zip(bots, tenants, strict=True):
             await bot.set_my_commands(COMMANDS)
             await bot.delete_webhook(drop_pending_updates=True)
@@ -140,6 +159,8 @@ async def main() -> None:
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task
+        if runner is not None:
+            await runner.cleanup()
         await grok.close()
         for bot in bots:
             await bot.session.close()

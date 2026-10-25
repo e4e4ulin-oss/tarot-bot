@@ -2,407 +2,66 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
 <meta name="robots" content="noindex">
+<title>Таро</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<title>Колода на столе</title>
-<!-- Ссылку на колоду посылают в переписке, и Telegram показывает её карточкой.
-     Без этих строк карточка пустая; адрес здесь полный, потому что
-     относительный в предпросмотре не раскрывается. -->
-<meta property="og:type" content="website">
-<meta property="og:title" content="Колода на столе">
-<meta property="og:description" content="Все 78 карт: нажмите на карту, чтобы рассмотреть и перевернуть.">
-<meta property="og:image" content="https://e4e4ulin-oss.github.io/tarot-bot/cover.jpg">
-<meta name="twitter:card" content="summary_large_image">
-<style>
-  /* Доска из 78 карт; тап открывает карту крупно поверх неё.
-     Размеры текста заданы в долях ширины карты, поэтому одна и та же вёрстка
-     работает и на миниатюре, и на развороте. */
-  :root {
-    --bg: #2A1012;
-    --bg-deep: #150708;
-    --paper: #F2E6D8;
-    --muted: #B9908E;
-    --gold: #E3C06A;
-    --gold-dim: #B98A3C;
-    --radius: 14px;
-    --card-min: 180px;
-
-    --tone-fool: #B98D5B;
-    --tone-major-1: #8F0303;
-    --tone-major-2: #101A33;
-    --tone-major-3: #15120F;
-    --tone-wands: #6D1A01;
-    --tone-cups: #123A4A;
-    --tone-swords: #29232B;
-    --tone-pentacles: #262813;
-
-    --font-display: "Cormorant Garamond", Georgia, "Times New Roman", serif;
-    --font-ui: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
-    color-scheme: dark;
-  }
-
-  body {
-    margin: 0;
-    background: radial-gradient(120% 70% at 50% 0%, #3A1518 0%, var(--bg) 45%, var(--bg-deep) 100%);
-    color: var(--paper);
-    font-family: var(--font-ui);
-    -webkit-font-smoothing: antialiased;
-  }
-
-  .wrap { max-width: 1180px; margin: 0 auto; padding: 24px 16px calc(40px + env(safe-area-inset-bottom, 0px)); }
-
-  header h1 {
-    font-family: var(--font-display);
-    font-size: clamp(26px, 5vw, 38px);
-    letter-spacing: .04em;
-    margin: 0 0 6px;
-    text-wrap: balance;
-  }
-  header p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.5; max-width: 62ch; }
-
-  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 20px 0 22px; }
-  .chip {
-    font: inherit; font-size: 13px; padding: 7px 13px; min-height: 36px;
-    border-radius: 999px;
-    border: 1px solid rgba(227, 192, 106, .32);
-    background: rgba(227, 192, 106, .07);
-    color: var(--paper); cursor: pointer;
-  }
-  .chip[aria-pressed="true"] { background: var(--gold); border-color: var(--gold); color: #2A1012; }
-  .chip:focus-visible, .card:focus-visible, .close:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
-  .count { color: var(--muted); font-size: 13px; margin-left: auto; }
-
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr)); gap: 14px; }
-  .group-title {
-    grid-column: 1 / -1;
-    font-family: var(--font-display);
-    font-size: 19px; letter-spacing: .12em; text-transform: uppercase;
-    color: var(--gold-dim); margin: 18px 0 2px;
-  }
-  .group-title:first-child { margin-top: 0; }
-
-  /* --- карта --- */
-  .slot { perspective: 1200px; container-type: inline-size; }
-  .card {
-    position: relative; width: 100%; aspect-ratio: 2 / 3;
-    transform-style: preserve-3d;
-    transition: transform 620ms cubic-bezier(.2, .8, .2, 1);
-    border: 0; padding: 0; background: none; display: block; cursor: pointer;
-  }
-  .card.flipped { transform: rotateY(180deg); }
-
-  .side {
-    position: absolute; inset: 0;
-    border-radius: var(--radius); overflow: hidden;
-    backface-visibility: hidden; -webkit-backface-visibility: hidden;
-    box-shadow: 0 1px 0 rgba(255,228,184,.18) inset, 0 10px 20px rgba(0,0,0,.5);
-  }
-  .side::after {
-    content: ""; position: absolute; inset: 0; border-radius: inherit;
-    border: 1px solid rgba(227,192,106,.34); pointer-events: none;
-  }
-  .side img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .back { transform: rotateY(180deg); }
-
-  .face { background: var(--tone, var(--tone-major-1)); }
-  .face.pending::before {
-    content: ""; position: absolute;
-    left: 12%; right: 12%; top: 30%; bottom: 10%;
-    border: 1px dashed color-mix(in srgb, var(--card-ink) 30%, transparent);
-    border-radius: 8px;
-  }
-  .face.pending .waiting {
-    position: absolute; left: 0; right: 0; top: 54%;
-    text-align: center;
-    font-size: 11px; font-size: 5cqw;
-    letter-spacing: .16em; text-transform: uppercase;
-    color: color-mix(in srgb, var(--card-ink) 50%, transparent);
-  }
-
-  /* Лицо: только имя */
-  .title {
-    position: absolute; top: 8%; left: 6%; right: 6%;
-    text-align: center;
-    color: var(--card-ink, var(--gold));
-    font-family: var(--font-display);
-    line-height: 1.1;
-  }
-  .title .name { font-size: 17px; font-size: 9.5cqw; letter-spacing: .09em; text-indent: .09em; }
-  .title .name.second { margin-top: .08em; }
-
-  /* Рубашка: имя с цифрой, краткое, подробное */
-  .copy {
-    position: absolute;
-    left: 21.5%; right: 21.5%; top: 24%; bottom: 27%;
-    display: flex; flex-direction: column; justify-content: flex-start;
-    gap: .9em;
-    text-align: center;
-    font-family: var(--font-display);
-    color: var(--card-ink, var(--gold));
-  }
-  .copy .name { font-size: 11px; font-size: 6cqw; letter-spacing: .08em; line-height: 1.12; }
-  .copy .name.second { margin-top: .08em; }
-  .copy .motto {
-    font-family: var(--font-ui);
-    font-size: 7px; font-size: 3.1cqw;
-    letter-spacing: .1em; text-transform: uppercase;
-    color: color-mix(in srgb, var(--card-ink, var(--gold)) 70%, transparent);
-    margin-top: .5em;
-  }
-  .copy .card-text {
-    font-size: 9px; font-size: 5cqw;
-    line-height: 1.35;
-    color: color-mix(in srgb, var(--card-ink, var(--gold)) 88%, transparent);
-  }
-  .numeral { font-size: .64em; letter-spacing: .08em; opacity: .85; }
-
-  /* --- разворот --- */
-  .viewer {
-    position: fixed; inset: 0; z-index: 10;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 18px;
-    padding: calc(16px + env(safe-area-inset-top, 0px)) 16px calc(16px + env(safe-area-inset-bottom, 0px));
-    background: rgba(12, 5, 6, .88);
-    backdrop-filter: blur(8px);
-  }
-  .viewer[hidden] { display: none; }
-  .viewer .slot { width: min(86vw, calc((100svh - 150px) / 1.5), 420px); }
-  .viewer .card { box-shadow: none; }
-  .viewer-hint { color: var(--muted); font-size: 13px; letter-spacing: .06em; text-transform: uppercase; }
-  .close {
-    position: absolute; top: calc(10px + env(safe-area-inset-top, 0px)); right: 12px;
-    width: 44px; height: 44px; border-radius: 999px;
-    border: 1px solid rgba(227,192,106,.3);
-    background: rgba(0,0,0,.35); color: var(--paper);
-    font-size: 20px; line-height: 1; cursor: pointer;
-  }
-
-  @media (prefers-reduced-motion: reduce) { .card { transition-duration: 1ms; } }
-
-  /* В Telegram страница лежит под системной шторкой: нижний отступ по вырезу */
-  html.in-telegram body { padding-bottom: env(safe-area-inset-bottom); }
-</style>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500&family=Manrope:wght@400;500&display=swap">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Manrope:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
 </head>
 <body>
 
-<div class="wrap">
-  <header>
-    <h1>Колода на столе</h1>
-    <p>Все 78 карт в порядке колоды. Нарисованные показаны лицом, у остальных лицо пустое,
-      но с готовым именем и тоном своей группы. Нажмите на карту — она откроется крупно,
-      и там её можно перевернуть: на рубашке имя, цифра аркана, краткое и подробное значение.</p>
+<div class="app">
+  <header class="topbar">
+    <img src="assets/emblem.webp" alt="" width="38" height="38">
+    <div>
+      <h1 id="brand">Таро</h1>
+      <p id="brand-sub">расклады и разборы</p>
+    </div>
   </header>
 
-  <div class="toolbar">
-    <button class="chip" data-filter="all" aria-pressed="true">Все 78</button>
-    <button class="chip" data-filter="major">Старшие арканы</button>
-    <button class="chip" data-filter="minor">Младшие</button>
-    <button class="chip" data-size="132">Мелко</button>
-    <button class="chip" data-size="180" aria-pressed="true">Средне</button>
-    <button class="chip" data-size="264">Крупно</button>
-    <span class="count" id="count"></span>
-  </div>
+  <!-- Карта дня -->
+  <section class="screen on" id="s-daily" data-tab="daily">
+    <h2>Карта дня</h2>
+    <p class="lead">Одна карта — настроение и задача на сегодня.</p>
+    <div id="daily-body"><div class="skeleton"></div></div>
+  </section>
 
-  <div class="grid" id="grid"></div>
+  <!-- Расклад -->
+  <section class="screen" id="s-spread" data-tab="spread">
+    <div class="hero">
+      <img src="assets/spreads-header.webp" alt="">
+      <div class="over">Расклад</div>
+    </div>
+    <p class="lead">Выберите раскладку — дальше можно задать вопрос.</p>
+    <div id="spread-body"><div class="skeleton"></div><div class="skeleton"></div></div>
+  </section>
+
+  <!-- Авторский разбор -->
+  <section class="screen" id="s-author" data-tab="author">
+    <h2>Авторский разбор</h2>
+    <p class="lead" id="author-lead">Живой разбор от таролога, а не от модели.</p>
+    <div id="author-body"><div class="skeleton"></div><div class="skeleton"></div></div>
+  </section>
+
+  <!-- Кабинет -->
+  <section class="screen" id="s-profile" data-tab="profile">
+    <h2>Кабинет</h2>
+    <p class="lead">Ваши данные и история раскладов.</p>
+    <div id="profile-body"><div class="skeleton"></div><div class="skeleton"></div></div>
+  </section>
 </div>
 
-<div class="viewer" id="viewer" hidden>
-  <button class="close" id="close" aria-label="Закрыть">✕</button>
-  <div class="slot" id="viewer-slot"></div>
-  <div class="viewer-hint" id="viewer-hint">Нажмите на карту, чтобы перевернуть</div>
-</div>
+<nav class="tabbar">
+  <button class="tab on" data-go="daily"><svg><use href="assets/icons.svg#i-sun"></use></svg>Карта дня</button>
+  <button class="tab" data-go="spread"><svg><use href="assets/icons.svg#i-cards"></use></svg>Расклад</button>
+  <button class="tab" data-go="author"><svg><use href="assets/icons.svg#i-quill"></use></svg>Разбор</button>
+  <button class="tab" data-go="deck"><svg><use href="assets/icons.svg#i-zodiac"></use></svg>Колода</button>
+  <button class="tab" data-go="profile"><svg><use href="assets/icons.svg#i-moon"></use></svg>Кабинет</button>
+</nav>
 
-<script>
-  const GOLD = 'var(--gold)';
-  const DARK = '#4A2E18';
-  // Telegram кэширует мини-приложение надолго. Бот открывает колоду с меткой
-  // времени в адресе, и эту же метку страница приписывает к своим файлам:
-  // перерисованная карта тогда доезжает, а не остаётся прежней.
-  const STAMP = new URLSearchParams(location.search).get('v');
-  const V = STAMP ? `?v=${encodeURIComponent(STAMP)}` : '';
-
-  const TONES = {
-    fool:      { bg: 'var(--tone-fool)',      ink: DARK, back: 'backs/back-fool.jpg' },
-    major1:    { bg: 'var(--tone-major-1)',   ink: GOLD, back: 'backs/back-major1.jpg' },
-    major2:    { bg: 'var(--tone-major-2)',   ink: GOLD, back: 'backs/back-major2.jpg' },
-    major3:    { bg: 'var(--tone-major-3)',   ink: GOLD, back: 'backs/back-major3.jpg' },
-    wands:     { bg: 'var(--tone-wands)',     ink: GOLD, back: 'backs/back-wands.jpg' },
-    cups:      { bg: 'var(--tone-cups)',      ink: GOLD, back: 'backs/back-cups.jpg' },
-    swords:    { bg: 'var(--tone-swords)',    ink: GOLD, back: 'backs/back-swords.jpg' },
-    pentacles: { bg: 'var(--tone-pentacles)', ink: GOLD, back: 'backs/back-pentacles.jpg' },
-  };
-  const SUIT_TITLES = {
-    major: 'Старшие арканы', wands: 'Жезлы', cups: 'Кубки', swords: 'Мечи', pentacles: 'Пентакли',
-  };
-  // Нарисованные карты: лицо берётся из cards/, остальные показывают пустое поле
-  const PAINTED = new Set(["major_00", "major_01", "major_02", "major_03", "major_04", "major_05", "major_06", "major_07", "major_08", "major_09", "major_10", "major_11", "major_12", "major_13", "major_14", "major_15", "major_16", "major_17", "major_18", "major_19", "major_20", "major_21", "wands_01", "wands_02", "wands_03", "wands_04", "wands_05", "wands_06", "wands_07", "wands_08", "wands_09", "wands_10", "wands_11", "wands_12", "wands_13", "wands_14", "cups_01", "cups_02", "cups_03", "cups_04", "cups_05", "cups_06", "cups_07", "cups_08", "cups_09", "cups_10", "cups_11", "cups_12", "cups_13", "cups_14", "swords_01", "swords_02", "swords_03", "swords_04", "swords_05", "swords_06", "swords_07", "swords_08", "swords_09", "swords_10", "swords_11", "swords_12", "swords_13", "swords_14", "pentacles_01", "pentacles_02", "pentacles_03", "pentacles_04", "pentacles_05", "pentacles_06", "pentacles_07", "pentacles_08", "pentacles_09", "pentacles_10", "pentacles_11", "pentacles_12", "pentacles_13", "pentacles_14"]);
-
-  function toneFor(card) {
-    if (card.group !== 'major') return TONES[card.group];
-    if (card.order === 0) return TONES.fool;
-    if (card.order <= 7) return TONES.major1;
-    if (card.order <= 14) return TONES.major2;
-    return TONES.major3;
-  }
-
-  // Имя занимает максимум две строки: одно слово — цифра на вторую строку,
-  // два слова — вторым словом, цифра сразу за ним.
-  function nameLines(card, withNumeral) {
-    const words = card.name.toUpperCase().split(/\s+/);
-    const numeral = withNumeral && card.numeral
-      ? `<span class="numeral">(${card.numeral})</span>` : '';
-    if (words.length === 1) return [words[0], numeral];
-    const [first, ...rest] = words;
-    return [first, [rest.join(' '), numeral].filter(Boolean).join(' ')];
-  }
-
-  function nameHtml(card, withNumeral) {
-    const [one, two] = nameLines(card, withNumeral);
-    return `<div class="name">${one}</div>` + (two ? `<div class="name second">${two}</div>` : '');
-  }
-
-  // Краткое описание: одна строка, не длиннее двух слов
-  function motto(card) {
-    return card.mini.split(',')[0].trim().split(/\s+/).slice(0, 2).join(' ');
-  }
-
-  function cardHtml(card) {
-    const tone = toneFor(card);
-    const painted = PAINTED.has(card.id) ? `cards/${card.id}.jpg${V}` : null;
-    return `
-      <button class="card" aria-label="${card.name}" aria-pressed="false">
-        <div class="side face${painted ? '' : ' pending'}" style="--tone:${tone.bg};--card-ink:${tone.ink}">
-          ${painted ? `<img src="${painted}" alt="${card.name}">` : ''}
-          <div class="title">${nameHtml(card, false)}</div>
-          ${painted ? '' : '<div class="waiting">не нарисована</div>'}
-        </div>
-        <div class="side back" style="--card-ink:${tone.ink}">
-          <img src="${tone.back}${V}" alt="Рубашка карты" loading="lazy">
-          <div class="copy">
-            <div>${nameHtml(card, true)}<div class="motto">${motto(card)}</div></div>
-            <div class="card-text">${card.text}</div>
-          </div>
-        </div>
-      </button>`;
-  }
-
-  // --- разворот ---
-  const viewer = document.getElementById('viewer');
-  const viewerSlot = document.getElementById('viewer-slot');
-  const viewerHint = document.getElementById('viewer-hint');
-  let lastOpener = null;
-
-  function openCard(card, opener) {
-    lastOpener = opener;
-    viewerSlot.innerHTML = cardHtml(card);
-    const big = viewerSlot.querySelector('.card');
-    big.addEventListener('click', () => {
-      const flipped = big.classList.toggle('flipped');
-      big.setAttribute('aria-pressed', String(flipped));
-      viewerHint.textContent = flipped ? 'Обратная сторона' : 'Нажмите на карту, чтобы перевернуть';
-    });
-    viewerHint.textContent = 'Нажмите на карту, чтобы перевернуть';
-    viewer.hidden = false;
-    document.getElementById('close').focus();
-  }
-
-  function closeCard() {
-    viewer.hidden = true;
-    viewerSlot.textContent = '';
-    if (lastOpener) lastOpener.focus();
-  }
-
-  document.getElementById('close').addEventListener('click', closeCard);
-  viewer.addEventListener('click', (event) => { if (event.target === viewer) closeCard(); });
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && !viewer.hidden) closeCard();
-  });
-
-  // --- доска ---
-  const grid = document.getElementById('grid');
-  const count = document.getElementById('count');
-  let cards = [];
-
-  function render(filter) {
-    grid.textContent = '';
-    const shown = cards.filter((c) =>
-      filter === 'all' || (filter === 'major' ? c.group === 'major' : c.group !== 'major'));
-
-    let currentGroup = null;
-    for (const card of shown) {
-      if (card.group !== currentGroup) {
-        currentGroup = card.group;
-        const heading = document.createElement('div');
-        heading.className = 'group-title';
-        heading.textContent = SUIT_TITLES[currentGroup] || currentGroup;
-        grid.append(heading);
-      }
-      const slot = document.createElement('div');
-      slot.className = 'slot';
-      slot.innerHTML = cardHtml(card);
-      const button = slot.querySelector('.card');
-      button.addEventListener('click', () => openCard(card, button));
-      grid.append(slot);
-    }
-    count.textContent = `${shown.length} карт · нарисовано ${cards.filter((c) => PAINTED.has(c.id)).length}`;
-  }
-
-  fetch(`cards.json${V}`)
-    .then((r) => r.json())
-    .then((data) => { cards = data; render('all'); })
-    .catch(() => { count.textContent = 'Не удалось загрузить колоду'; });
-
-  function pressGroup(chip, group) {
-    for (const other of document.querySelectorAll(`.chip[data-${group}]`)) {
-      other.setAttribute('aria-pressed', String(other === chip));
-    }
-  }
-
-  for (const chip of document.querySelectorAll('.chip[data-filter]')) {
-    chip.addEventListener('click', () => { pressGroup(chip, 'filter'); render(chip.dataset.filter); });
-  }
-  for (const chip of document.querySelectorAll('.chip[data-size]')) {
-    chip.addEventListener('click', () => {
-      document.documentElement.style.setProperty('--card-min', chip.dataset.size + 'px');
-      pressGroup(chip, 'size');
-    });
-  }
-</script>
-
-<script>
-  // --- Telegram ---
-  // Страница должна работать и в обычном браузере: внутри Telegram появляется
-  // window.Telegram.WebApp, снаружи — нет, и тогда весь этот блок просто молчит.
-  (function () {
-    const tg = window.Telegram && window.Telegram.WebApp;
-    if (!tg) return;
-
-    tg.ready();
-    tg.expand();
-    const ink = getComputedStyle(document.documentElement);
-    const deep = ink.getPropertyValue('--bg-deep').trim();
-    if (tg.setHeaderColor) tg.setHeaderColor(deep);
-    if (tg.setBackgroundColor) tg.setBackgroundColor(deep);
-    document.documentElement.classList.add('in-telegram');
-
-    // Системная кнопка «назад» закрывает разворот, а не приложение
-    const viewer = document.getElementById('viewer');
-    const close = document.getElementById('close');
-    tg.BackButton.onClick(() => close.click());
-
-    new MutationObserver(() => {
-      if (viewer.hidden) tg.BackButton.hide();
-      else tg.BackButton.show();
-    }).observe(viewer, { attributes: true, attributeFilter: ['hidden'] });
-
-    // Отклик на переворот карты: тихий, короткий
-    document.addEventListener('click', (event) => {
-      if (!event.target.closest('.card')) return;
-      if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
-    }, true);
-  })();
-</script>
+<script src="app.js"></script>
 </body>
 </html>
