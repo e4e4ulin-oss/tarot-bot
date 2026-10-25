@@ -254,3 +254,22 @@ def test_the_web_script_and_the_bot_agree_on_the_port():
 
     assert fallback, "в скрипте не нашёлся порт по умолчанию"
     assert int(fallback.group(1)) == Settings().web_port
+
+
+def test_the_deck_page_has_a_way_back():
+    """Колода — отдельная страница: вкладок на ней нет, и без выхода она ловушка.
+
+    Системная кнопка «назад» здесь раньше показывалась только поверх открытой
+    карты, а на доске пряталась — уйти из колоды было некуда.
+    """
+    from pathlib import Path
+
+    page = Path(__file__).resolve().parents[1] / "miniapp" / "deck.html"
+    text = page.read_text(encoding="utf-8")
+
+    assert 'id="leave"' in text, "нет видимой ссылки выхода"
+    assert "function leaveToApp" in text
+
+    # Кнопка Telegram включается сразу, а не только при открытой карте
+    assert "tg.BackButton.show();" in text
+    assert "BackButton.hide" not in text

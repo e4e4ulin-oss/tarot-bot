@@ -52,6 +52,16 @@
 
   .wrap { max-width: 1180px; margin: 0 auto; padding: 24px 16px calc(40px + env(safe-area-inset-bottom, 0px)); }
 
+  /* Колода — отдельная страница, и уйти с неё можно только отсюда: вкладок
+     приложения здесь нет. Ссылка стоит первой, до заголовка. */
+  .leave {
+    display: inline-flex; align-items: center; gap: 6px;
+    min-height: 44px; margin: 0 0 6px; padding: 0 2px;
+    border: 0; background: none; cursor: pointer;
+    font: inherit; font-size: 15px; color: var(--gold);
+  }
+  .leave svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
+
   header h1 {
     font-family: var(--font-display);
     font-size: clamp(26px, 5vw, 38px);
@@ -189,6 +199,10 @@
 
 <div class="wrap">
   <header>
+    <button class="leave" id="leave" type="button">
+      <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      В приложение
+    </button>
     <h1>Колода на столе</h1>
     <p>Все 78 карт в порядке колоды. Нарисованные показаны лицом, у остальных лицо пустое,
       но с готовым именем и тоном своей группы. Нажмите на карту — она откроется крупно,
@@ -320,6 +334,21 @@
     if (event.key === 'Escape' && !viewer.hidden) closeCard();
   });
 
+  // --- выход в приложение ---
+  // Возврат по истории сохраняет вкладку и прокрутку приложения; если истории
+  // нет (колоду открыли ссылкой напрямую), уходим на страницу приложения,
+  // сохранив метку версии из адреса.
+  function leaveToApp() {
+    const came = document.referrer && document.referrer.indexOf(location.origin) === 0;
+    if (came && history.length > 1) {
+      history.back();
+      return;
+    }
+    location.href = `index.html${location.search}`;
+  }
+
+  document.getElementById('leave').addEventListener('click', leaveToApp);
+
   // --- доска ---
   const grid = document.getElementById('grid');
   const count = document.getElementById('count');
@@ -387,15 +416,16 @@
     if (tg.setBackgroundColor) tg.setBackgroundColor(deep);
     document.documentElement.classList.add('in-telegram');
 
-    // Системная кнопка «назад» закрывает разворот, а не приложение
+    // Системная кнопка «назад» нужна здесь всегда: открыта карта — закрывает
+    // её, закрыта — уводит в приложение. Раньше она пряталась на доске, и уйти
+    // из колоды было некуда: вкладок на этой странице нет.
     const viewer = document.getElementById('viewer');
     const close = document.getElementById('close');
-    tg.BackButton.onClick(() => close.click());
-
-    new MutationObserver(() => {
-      if (viewer.hidden) tg.BackButton.hide();
-      else tg.BackButton.show();
-    }).observe(viewer, { attributes: true, attributeFilter: ['hidden'] });
+    tg.BackButton.onClick(() => {
+      if (viewer.hidden) leaveToApp();
+      else close.click();
+    });
+    tg.BackButton.show();
 
     // Отклик на переворот карты: тихий, короткий
     document.addEventListener('click', (event) => {
