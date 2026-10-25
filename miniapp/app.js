@@ -226,6 +226,10 @@
             <h3>Подробный разбор карты</h3>
             <p>Пишется один раз и надолго</p>
           </div>
+          <div class="card tap" data-go="invite">
+            <h3>Пригласить друга</h3>
+            <p>Бесплатные расклады вам и ему${r.bonus ? ` · сейчас ${r.bonus} в запасе` : ""}</p>
+          </div>
 
           <h3 style="font-family:var(--serif);font-weight:500;margin:18px 2px 10px">История</h3>
           <div class="rows">${history}</div>
@@ -371,6 +375,101 @@
         fail(body, err);
       }
     },
+  };
+
+  /* Приглашения и промокод на одном экране: это один разговор о том, как
+     получить расклады не за деньги. Ссылка сверху, код снизу. */
+  profileRender.invite = async function inviteView() {
+    const body = $("#profile-body");
+    const head = `${backLink("В кабинет", "p-back")}
+      <h3 style="font-family:var(--serif);font-weight:500;font-size:22px;margin:0 0 10px">Пригласить друга</h3>`;
+    body.innerHTML = `${head}<p class="waiting">Готовлю ссылку…</p>`;
+    bindProfileBack();
+
+    try {
+      const data = await api("invite");
+      const forYou = `${data.bonus} ${plural(data.bonus, "расклад", "расклада", "раскладов")}`;
+      const forFriend = `${data.welcome} ${plural(data.welcome, "расклад", "расклада", "раскладов")}`;
+
+      body.innerHTML = `${head}
+        <div class="card">
+          <h3>Зовите своих</h3>
+          <p>Кто придёт по вашей ссылке и сделает первый расклад — принесёт вам ${forYou}.
+             Другу при входе достаётся ${forFriend}.</p>
+        </div>
+        <div class="field one-line plain link" id="i-link">${esc(data.link)}</div>
+        <button class="btn" id="i-share">Отправить другу</button>
+        <button class="btn ghost" id="i-copy">Скопировать ссылку</button>
+        <div class="rows" style="margin:16px 0 18px">
+          <div class="row"><span>Приглашено</span><b id="i-count">${data.invited}</b></div>
+          <div class="row"><span>Бесплатных раскладов</span>
+            <b id="i-left">${data.unlimited ? "без ограничений" : data.free_left}</b></div>
+        </div>
+        <h3 style="font-family:var(--serif);font-weight:500;font-size:20px;margin:0 0 8px">Промокод</h3>
+        <p class="lead">Если у вас есть код — введите, расклады начислятся сразу.</p>
+        <input class="field one-line plain" id="i-code" placeholder="ОСЕНЬ"
+               autocapitalize="characters" autocomplete="off" spellcheck="false">
+        <button class="btn ghost" id="i-apply">Применить</button>
+        <p class="note" id="i-msg"></p>`;
+      bindProfileBack();
+
+      const share = () => {
+        tap("medium");
+        const text =
+          "Расклады Таро с разбором — заходи по моей ссылке, первый расклад уже ждёт.";
+        const url = `https://t.me/share/url?url=${encodeURIComponent(data.link)}&text=${encodeURIComponent(text)}`;
+        if (tg && tg.openTelegramLink) tg.openTelegramLink(url);
+        else window.open(url, "_blank");
+      };
+      $("#i-share").addEventListener("click", share);
+
+      $("#i-copy").addEventListener("click", async () => {
+        tap();
+        const note = $("#i-msg");
+        try {
+          await navigator.clipboard.writeText(data.link);
+          note.textContent = "Ссылка скопирована.";
+        } catch (err) {
+          // В некоторых клиентах буфер обмена закрыт — честнее сказать, чем
+          // делать вид, что скопировали
+          note.textContent = "Скопировать не вышло — выделите ссылку выше вручную.";
+        }
+      });
+
+      $("#i-apply").addEventListener("click", async () => {
+        const field = $("#i-code");
+        const button = $("#i-apply");
+        const note = $("#i-msg");
+        const code = (field.value || "").trim();
+        if (!code) {
+          note.textContent = "Введите код.";
+          return;
+        }
+        button.disabled = true;
+        note.textContent = "";
+        try {
+          const result = await api("promo", {
+            method: "POST",
+            body: JSON.stringify({ code }),
+          });
+          tap("medium");
+          field.value = "";
+          note.textContent = `Принято: +${result.readings} ${plural(
+            result.readings,
+            "расклад",
+            "расклада",
+            "раскладов"
+          )}.`;
+          const left = $("#i-left");
+          if (left && !data.unlimited) left.textContent = result.free_left;
+        } catch (err) {
+          note.textContent = err.message;
+        }
+        button.disabled = false;
+      });
+    } catch (err) {
+      fail(body, err);
+    }
   };
 
   profileRender.natal = async function natalView() {

@@ -23,8 +23,9 @@ from aiogram import Bot
 from aiogram.types import LabeledPrice
 from aiohttp import web
 
-from .. import analytics, geo, texts
+from .. import analytics, geo, referrals, texts
 from .. import profile as profile_parse
+from .. import promo as promo_rules
 from ..access import check as check_access
 from ..config import Settings
 from ..db import Repo
@@ -203,8 +204,11 @@ async def handle_me(request: web.Request) -> web.Response:
         subscribed = await repo.is_daily_subscribed(identity.user.id)
         history = await repo.last_readings(identity.user.id, limit=10)
         order = await repo.open_order_for_user(identity.user.id)
+        # Остаток спрашиваем у правил доступа: у человека могут быть расклады
+        # за приглашённых друзей и за промокоды, и своя арифметика их потеряет
+        left = (await check_access(repo, settings, identity.user.id)).free_left
 
-    left = max(0, settings.free_auto_readings - used)
+    granted = settings.free_auto_readings + (user.bonus_readings or 0)
     return json_ok(
         {
             "user": {
@@ -223,7 +227,8 @@ async def handle_me(request: web.Request) -> web.Response:
             "readings": {
                 "used": used,
                 "free_left": left,
-                "free_limit": settings.free_auto_readings,
+                "free_limit": granted,
+                "bonus": user.bonus_readings or 0,
                 "needs_daily": settings.free_needs_daily and not subscribed,
             },
             "history": [
@@ -681,6 +686,65 @@ async def handle_order_cancel(request: web.Request) -> web.Response:
     return json_ok({"cancelled": True})
 
 
+async def handle_invite(request: web.Request) -> web.Response:
+    """Ссылка-приглашение, счёт приглашённых и остаток бесплатных раскладов."""
+    identity: Identity = request[IDENTITY]
+    settings: Settings = request[BRAND]
+    session_factory = request.app[SESSIONS]
+    bots: BotProvider = request.app[BOTS]
+
+    bot = await bots(identity.tenant_id)
+    if bot is None:
+        # Ссылка собирается из имени бота, а его знает только сам бот
+        return json_error("Бот недоступен", 503, "no_bot")
+    me = await bot.me()
+
+    async with session_factory() as session:
+        repo = Repo(session, tenant_id=identity.tenant_id)
+        invited = await repo.invited_count(identity.user.id)
+        access = await check_access(repo, settings, identity.user.id)
+
+    return json_ok(
+        {
+            "link": referrals.link_for(me.username or "", identity.user.id),
+            "invited": invited,
+            "bonus": settings.referral_bonus,
+            "welcome": settings.referral_welcome,
+            "free_left": access.free_left,
+            "unlimited": access.reason == "owner",
+        }
+    )
+
+
+async def handle_promo(request: web.Request) -> web.Response:
+    """Промокод. Отказ называется словом: «не подошёл» — не ответ."""
+    identity: Identity = request[IDENTITY]
+    settings: Settings = request[BRAND]
+    session_factory = request.app[SESSIONS]
+
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    async with session_factory() as session:
+        repo = Repo(session, tenant_id=identity.tenant_id)
+        result = await promo_rules.redeem(repo, identity.user.id, str(payload.get("code") or ""))
+        if not result.ok:
+            # Те же слова, что и в переписке: один отказ — один текст
+            message = texts.PROMO_REFUSED.get(result.reason, texts.PROMO_REFUSED["unknown"])
+            return json_error(message, 409, result.reason)
+        access = await check_access(repo, settings, identity.user.id)
+
+    return json_ok(
+        {
+            "readings": result.readings,
+            "bonus": result.total,
+            "free_left": access.free_left,
+        }
+    )
+
+
 async def handle_invoice(request: web.Request) -> web.Response:
     """Ссылка на оплату. Открывает её само приложение — Telegram умеет это сам."""
     identity: Identity = request[IDENTITY]
@@ -912,6 +976,8 @@ def create_app(
     app.router.add_post("/api/natal", handle_natal_write)
     app.router.add_post("/api/order", handle_order_create)
     app.router.add_delete("/api/order/{order_id}", handle_order_cancel)
+    app.router.add_get("/api/invite", handle_invite)
+    app.router.add_post("/api/promo", handle_promo)
     app.router.add_post("/api/invoice", handle_invoice)
     return app
 

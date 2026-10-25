@@ -379,6 +379,15 @@ body::after {
   font-size: 17px;
   letter-spacing: 0;
 }
+/* Ссылка-приглашение: поле только на вид — её читают и выделяют, но не правят.
+   Длинный адрес переносится, а не уезжает за край экрана. */
+.field.link {
+  font-size: 14px;
+  color: var(--muted);
+  word-break: break-all;
+  user-select: all;
+  -webkit-user-select: all;
+}
 
 label.note {
   display: block;

@@ -377,3 +377,92 @@ async def test_invoice_says_when_payments_are_not_set_up(client):
     # Токена продавца в тестовых настройках нет — и приложение должно это объяснить
     assert res.status == 409
     assert (await res.json())["error"] == "payment_not_ready"
+
+
+class FakeBot:
+    """Боту здесь нужно одно: назвать своё имя — из него собирается ссылка."""
+
+    class Me:
+        username = "Taroautorasklad_bot"
+        id = 1
+
+    async def me(self) -> "FakeBot.Me":
+        return self.Me()
+
+
+@pytest_asyncio.fixture
+async def client_with_bot(tmp_path):
+    engine = create_engine(f"sqlite+aiosqlite:///{tmp_path}/invite.db")
+    await init_models(engine)
+    factory = create_session_factory(engine)
+    settings = Settings()
+
+    async def tokens() -> dict[int, str]:
+        return {1: settings.bot_token}
+
+    async def brands(tenant_id: int) -> Settings:
+        return settings
+
+    async def bots(tenant_id: int) -> FakeBot:
+        return FakeBot()
+
+    app = create_app(settings, factory, tokens, brands, bots=bots)
+    test_client = TestClient(TestServer(app))
+    await test_client.start_server()
+    # Фабрика сессий нужна и самому тесту: промокод заводит владелец, а не
+    # приложение — в базу его кладём мимо API
+    test_client.sessions = factory
+    yield test_client
+    await test_client.close()
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_the_invite_screen_has_a_link_and_a_count(client_with_bot):
+    res = await client_with_bot.get("/api/invite", headers=auth(user_id=4242))
+    assert res.status == 200
+
+    data = await res.json()
+    assert data["link"].endswith("?start=ref4242")
+    assert data["invited"] == 0
+    assert data["bonus"] >= 1 and data["welcome"] >= 0
+
+
+@pytest.mark.asyncio
+async def test_a_promo_code_adds_readings_in_the_app(client_with_bot):
+    # Код заводит владелец; приложению остаётся его принять
+    from bot.db import Repo
+
+    async with client_with_bot.sessions() as session:
+        await Repo(session).add_promo("ОСЕНЬ", readings=4)
+
+    res = await client_with_bot.post(
+        "/api/promo", headers=auth(user_id=11), data='{"code": "осень"}'
+    )
+    assert res.status == 200
+    data = await res.json()
+    assert data["readings"] == 4 and data["bonus"] == 4
+
+    # Второй раз тем же человеком — отказ со своим словом, а не «ошибка»
+    again = await client_with_bot.post(
+        "/api/promo", headers=auth(user_id=11), data='{"code": "ОСЕНЬ"}'
+    )
+    assert again.status == 409
+    assert (await again.json())["error"] == "already"
+
+
+@pytest.mark.asyncio
+async def test_the_cabinet_counts_the_earned_readings(client_with_bot):
+    """Остаток в кабинете обязан знать про расклады за друзей и коды."""
+    from bot.db import Repo
+
+    async with client_with_bot.sessions() as session:
+        repo = Repo(session)
+        await repo.upsert_user(55, None, "Клиент")
+        await repo.set_daily_subscription(55, True)
+        await repo.add_bonus(55, 2)
+
+    data = await (await client_with_bot.get("/api/me", headers=auth(user_id=55))).json()
+
+    assert data["readings"]["bonus"] == 2
+    assert data["readings"]["free_limit"] == data["readings"]["free_left"] >= 2
