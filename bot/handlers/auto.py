@@ -18,8 +18,6 @@ from aiogram.types import (
 from aiogram.utils.chat_action import ChatActionSender
 
 from .. import analytics, texts
-from ..access import check as check_access
-from ..access import spend as spend_access
 from ..config import Settings
 from ..db import Repo
 from ..keyboards import (
@@ -30,19 +28,15 @@ from ..keyboards import (
     spreads_menu,
     subscribe_menu,
 )
+from ..services import reading
 from ..services.interpreter import DISCLAIMER, Interpreter
 from ..states import AutoFlow
-from ..profile import describe
-from ..schedule import now
 from ..tarot import (
     SPREADS,
     DrawnCard,
     Spread,
-    draw_spread,
     format_cards,
     get_spread,
-    rng_for,
-    serialize,
 )
 from ..tarot.images import cache_key, commons_url, local_path, reversed_image_bytes
 from ..tarot.layout import sheet
@@ -267,6 +261,28 @@ async def _card_photo(
     return key, InputMediaPhoto(media=source, caption=item.title)
 
 
+async def refuse(message: Message, settings: Settings, decision: reading.Refused) -> None:
+    """Говорит, почему расклада не будет, и предлагает выход."""
+    if decision.reason == "needs_daily":
+        await message.answer(texts.NEEDS_DAILY, reply_markup=subscribe_menu())
+    elif decision.reason == "payment_not_ready":
+        await message.answer(texts.PAYMENT_NOT_READY.format(author=settings.author_name))
+    elif decision.reason == "daily_limit":
+        await message.answer(
+            texts.DAILY_LIMIT.format(limit=decision.limit, author=settings.author_name),
+            reply_markup=after_reading_menu(settings.author_name),
+        )
+    else:
+        await message.answer(
+            texts.FREE_SPENT.format(
+                total=settings.free_auto_readings,
+                price=settings.auto_reading_price,
+                currency=settings.author_currency,
+            ),
+            reply_markup=paywall_menu(settings.auto_reading_price, settings.author_currency),
+        )
+
+
 async def run_reading(
     message: Message,
     user_id: int,
@@ -278,53 +294,24 @@ async def run_reading(
     *,
     number: int,
 ) -> None:
-    """Общий сценарий: доступ → лимит → карты → разбор → сохранение."""
-    access = await check_access(repo, settings, user_id)
-    if not access.allowed:
-        await repo.log_event(user_id, analytics.PAYWALL, access.reason)
-        if access.reason == "needs_daily":
-            await message.answer(texts.NEEDS_DAILY, reply_markup=subscribe_menu())
-        elif not settings.payment_provider_token:
-            await message.answer(texts.PAYMENT_NOT_READY.format(author=settings.author_name))
-        else:
-            await message.answer(
-                texts.FREE_SPENT.format(
-                    total=settings.free_auto_readings,
-                    price=settings.auto_reading_price,
-                    currency=settings.author_currency,
-                ),
-                reply_markup=paywall_menu(settings.auto_reading_price, settings.author_currency),
-            )
+    """Общий сценарий: доступ → лимит → карты → разбор → сохранение.
+
+    Сами правила живут в services/reading: из мини-приложения расклад идёт по
+    ним же, и двух разных ответов на вопрос «можно ли» быть не должно.
+    """
+    decision = await reading.start(repo, settings, user_id, spread, question, number=number)
+    if isinstance(decision, reading.Refused):
+        await refuse(message, settings, decision)
         return
 
-    if settings.daily_auto_limit > 0:
-        used = await repo.count_readings_today(user_id)
-        if used >= settings.daily_auto_limit:
-            await message.answer(
-                texts.DAILY_LIMIT.format(
-                    limit=settings.daily_auto_limit, author=settings.author_name
-                ),
-                reply_markup=after_reading_menu(settings.author_name),
-            )
-            return
-
-    # Карты ложатся под названное число, а не под случайность сервера:
-    # тот же человек с тем же числом в ту же минуту получит тот же расклад
-    drawn = draw_spread(
-        spread,
-        allow_reversed=settings.allow_reversed,
-        reversed_chance=settings.reversed_chance,
-        rng=rng_for(user_id, number, now(settings), question),
-    )
-    about = describe(await repo.get_user(user_id))
-
+    drawn = decision.drawn
     await send_card_images(message.bot, message.chat.id, drawn, repo, settings)
     cards_message = await message.answer(format_cards(spread, drawn, question))
     status = await message.answer(texts.INTERPRETING)
 
     # «печатает…» в чате, пока модель думает — иначе кажется, что бот завис
     async with ChatActionSender.typing(bot=message.bot, chat_id=message.chat.id):
-        result = await interpreter.interpret(spread, drawn, question, about=about)
+        result = await reading.finish(repo, interpreter, user_id, spread, question, decision)
 
     try:
         await status.delete()
@@ -340,14 +327,3 @@ async def run_reading(
             reply_markup=after_reading_menu(settings.author_name) if is_last else None,
         )
 
-    await repo.save_reading(
-        user_id=user_id,
-        spread_key=spread.key,
-        question=question,
-        cards=serialize(drawn),
-        interpretation=result.text,
-        ai_used=result.ai_used,
-    )
-    await repo.log_event(user_id, analytics.AUTO_READING, spread.key)
-    # Списываем только теперь: если расклад не состоялся, оплата остаётся
-    await spend_access(repo, access)
