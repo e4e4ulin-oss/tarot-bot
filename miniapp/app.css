@@ -21,6 +21,9 @@
   --shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
   --radius: 18px;
   --bar: 64px;
+  /* Отступы под вырез экрана и под кнопки Telegram. Обычный режим обходится
+     системными env(), а в полноэкранном Telegram выставляет свои переменные:
+     над страницей висят «закрыть» и «меню», и без запаса шапка уедет под них. */
   --sat: env(safe-area-inset-top, 0px);
   --sab: env(safe-area-inset-bottom, 0px);
   --serif: "Cormorant Garamond", Georgia, serif;
@@ -789,4 +792,24 @@ label.note {
   .dcard {
     transition-duration: 1ms;
   }
+}
+
+/* --- во весь экран --------------------------------------------------------
+   Включается только когда Telegram подтвердил полноэкранный режим: класс
+   ставится из кода по событию, а не угадывается по ширине окна. */
+
+html.fullscreen {
+  --sat: calc(
+    var(--tg-content-safe-area-inset-top, 0px) + var(--tg-safe-area-inset-top, 0px) + 8px
+  );
+  --sab: calc(var(--tg-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 4px);
+}
+
+/* Кнопки Telegram занимают правый верхний угол: заголовок к ним не лезет */
+html.fullscreen .topbar {
+  padding-right: 96px;
+}
+
+html.fullscreen .dclose {
+  top: calc(10px + var(--sat));
 }

@@ -20,6 +20,36 @@
     if (tg.disableVerticalSwipes) tg.disableVerticalSwipes();
     if (tg.setHeaderColor) tg.setHeaderColor("#080d1f");
     if (tg.setBackgroundColor) tg.setBackgroundColor("#080d1f");
+
+    // Во весь экран: карты и разбор занимают всю высоту, а не две трети.
+    // Доступно с Bot API 8.0 и только на телефонах — на компьютере окно
+    // приложения и так своё, и разворачивать там нечего.
+    const fullscreenReady =
+      typeof tg.requestFullscreen === "function" &&
+      typeof tg.isVersionAtLeast === "function" &&
+      tg.isVersionAtLeast("8.0");
+    const phone = ["android", "ios"].includes(String(tg.platform || "").toLowerCase());
+
+    if (fullscreenReady && phone && !tg.isFullscreen) {
+      try {
+        tg.requestFullscreen();
+      } catch (err) {
+        // Отказали — приложение просто останется развёрнутым, как было
+      }
+    }
+
+    // В полноэкранном режиме кнопки Telegram висят поверх страницы: отступы
+    // приходят отдельными переменными, и без них шапка уезжает под них.
+    const syncInsets = () => {
+      document.documentElement.classList.toggle("fullscreen", Boolean(tg.isFullscreen));
+    };
+    syncInsets();
+    if (tg.onEvent) {
+      tg.onEvent("fullscreenChanged", syncInsets);
+      tg.onEvent("fullscreenFailed", syncInsets);
+      tg.onEvent("safeAreaChanged", syncInsets);
+      tg.onEvent("contentSafeAreaChanged", syncInsets);
+    }
   }
 
   const tap = (style = "light") => {

@@ -277,3 +277,26 @@ def test_the_deck_is_a_tab_not_a_page():
     # Старый адрес не рисует колоду заново, а отдаёт её приложению
     assert "location.replace" in old_page
     assert "#deck" in old_page
+
+
+def test_the_app_asks_for_the_whole_screen():
+    """Во весь экран — и с запасом под кнопки Telegram поверх страницы.
+
+    Полноэкранный режим появился в Bot API 8.0, поэтому просить его вслепую
+    нельзя: на старом клиенте вызова просто нет. А когда он включён, сверху
+    висят «закрыть» и «меню» — без отступа под них шапка оказывается под
+    кнопками, и по ней невозможно попасть.
+    """
+    from pathlib import Path
+
+    miniapp = Path(__file__).resolve().parents[1] / "miniapp"
+    script = (miniapp / "app.js").read_text(encoding="utf-8")
+    styles = (miniapp / "app.css").read_text(encoding="utf-8")
+
+    assert "requestFullscreen" in script
+    assert 'isVersionAtLeast("8.0")' in script, "просим режим, не проверив версию"
+    assert "fullscreenChanged" in script, "состояние режима меняется и после запуска"
+
+    assert "html.fullscreen" in styles
+    assert "--tg-content-safe-area-inset-top" in styles
+    assert "--tg-safe-area-inset-bottom" in styles
