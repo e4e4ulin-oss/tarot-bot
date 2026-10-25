@@ -188,10 +188,10 @@
           ? me.history
               .map(
                 (item) => `
-              <div class="row">
-                <span>${esc(item.spread || item.mode)}</span>
-                <b>${esc(dateLabel(item.created_at))}</b>
-              </div>`
+              <button class="row tap" data-reading="${item.id}">
+                <span>${esc(item.title || item.spread || item.mode)}</span>
+                <b>${esc(dateLabel(item.created_at))} ›</b>
+              </button>`
               )
               .join("")
           : `<div class="row"><span>Раскладов пока нет</span><b>—</b></div>`;
@@ -251,6 +251,13 @@
           node.addEventListener("click", () => {
             tap();
             profileView(node.dataset.go, me);
+          })
+        );
+
+        body.querySelectorAll("[data-reading]").forEach((node) =>
+          node.addEventListener("click", () => {
+            tap();
+            profileRender.reading(node.dataset.reading);
           })
         );
       } catch (err) {
@@ -482,6 +489,44 @@
 
   /* Хозяйский экран: список кодов и форма нового. Кнопка спрятана от клиента,
      но решает не вёрстка — сервер проверяет сам и чужому отвечает отказом. */
+  /* Сохранённый расклад: те же карты и тот самый разбор. Пишется он один раз,
+     и перечитать его человек вправе — платить второй раз за написанное нет. */
+  profileRender.reading = async function readingView(id) {
+    const body = $("#profile-body");
+    const head = `${backLink("В кабинет", "p-back")}`;
+    body.innerHTML = `${head}<p class="waiting">Достаю расклад…</p>`;
+    bindProfileBack();
+
+    try {
+      const data = await api(`readings/${encodeURIComponent(id)}`);
+      const wide = data.cards.length > 5;
+      const laid = data.cards.length
+        ? `<div class="deal${wide ? " wide" : ""}">
+             ${data.cards
+               .map(
+                 (card) => `
+               <div class="slot${card.reversed ? " rev" : ""}">
+                 <img src="${esc(card.image)}" alt="${esc(card.name)}" loading="lazy">
+                 <b>${esc(card.name)}</b>
+                 <span>${esc(card.position)}</span>
+               </div>`
+               )
+               .join("")}
+           </div>`
+        : "";
+
+      body.innerHTML = `${head}
+        <h3 style="font-family:var(--serif);font-weight:500;font-size:22px;margin:0 0 4px">${esc(data.title)}</h3>
+        <p class="lead">${esc(dateLabel(data.created_at))}${data.question ? ` · «${esc(data.question)}»` : ""}</p>
+        ${laid}
+        <div class="card"><div class="reading">${data.text || "Разбор к этому раскладу не сохранился."}</div></div>
+        ${data.ai ? "" : '<p class="note">Разбор собран по значениям карт: модель тогда была недоступна.</p>'}`;
+      bindProfileBack();
+    } catch (err) {
+      fail(body, err);
+    }
+  };
+
   profileRender.promos = async function promosView() {
     const body = $("#profile-body");
     const head = `${backLink("В кабинет", "p-back")}

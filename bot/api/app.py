@@ -42,7 +42,7 @@ from ..services import reading as reading_rules
 from ..services.daily import card_of_the_day
 from ..services.grok import GrokClient, GrokError
 from ..services.interpreter import Interpreter
-from ..tarot import SPREAD_ORDER, SPREADS, DrawnCard, get_spread
+from ..tarot import SPREAD_ORDER, SPREADS, DrawnCard, deserialize, get_spread
 from ..tiers import find_tier
 from ..tiers import tiers as author_tiers
 from .auth import AuthError, Identity, WebAppUser, init_data_from_header, verify
@@ -689,6 +689,44 @@ async def handle_order_cancel(request: web.Request) -> web.Response:
     return json_ok({"cancelled": True})
 
 
+async def handle_reading_one(request: web.Request) -> web.Response:
+    """Сохранённый расклад целиком: карты и тот самый разбор.
+
+    Разбор пишется один раз и остаётся: перечитать его человек вправе, а
+    платить второй раз за уже написанное — нет.
+    """
+    identity: Identity = request[IDENTITY]
+
+    try:
+        reading_id = int(request.match_info["reading_id"])
+    except (TypeError, ValueError):
+        return json_error("Расклад не найден", 404, "unknown")
+
+    async with request.app[SESSIONS]() as session:
+        item = await Repo(session, tenant_id=identity.tenant_id).get_reading(reading_id)
+
+    # Чужой расклад и несуществующий отвечают одинаково: по разнице ответов
+    # чужие расклады пересчитываются
+    if item is None or item.user_id != identity.user.id:
+        return json_error("Расклад не найден", 404, "unknown")
+
+    spread = SPREADS.get(item.spread_key)
+    drawn = deserialize(item.cards or [])
+    return json_ok(
+        {
+            "id": item.id,
+            "mode": item.mode.value if hasattr(item.mode, "value") else str(item.mode),
+            "spread": item.spread_key,
+            "title": spread.title if spread else item.spread_key,
+            "question": item.question,
+            "created_at": item.created_at.isoformat() if item.created_at else None,
+            "cards": [{**card_payload(card), "position": card.position} for card in drawn],
+            "text": item.interpretation or "",
+            "ai": item.ai_used,
+        }
+    )
+
+
 async def handle_invite(request: web.Request) -> web.Response:
     """Ссылка-приглашение, счёт приглашённых и остаток бесплатных раскладов."""
     identity: Identity = request[IDENTITY]
@@ -1088,6 +1126,7 @@ def create_app(
     app.router.add_post("/api/natal", handle_natal_write)
     app.router.add_post("/api/order", handle_order_create)
     app.router.add_delete("/api/order/{order_id}", handle_order_cancel)
+    app.router.add_get("/api/readings/{reading_id}", handle_reading_one)
     app.router.add_get("/api/invite", handle_invite)
     app.router.add_get("/api/admin/promos", handle_promos_list)
     app.router.add_post("/api/admin/promos", handle_promo_create)

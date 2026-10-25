@@ -37,6 +37,20 @@ def main_menu(author_name: str) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def history_menu(items: Sequence[tuple[int, str]]) -> InlineKeyboardMarkup:
+    """Список прошлых раскладов: каждый открывается целиком.
+
+    Разбор написан один раз и сохранён — перечитать его человек вправе, а
+    список, который нельзя открыть, выглядит как обещание без продолжения.
+    """
+    builder = InlineKeyboardBuilder()
+    for reading_id, label in items:
+        builder.button(text=label, callback_data=f"history:{reading_id}")
+    builder.button(text="‹ Назад", callback_data="menu:main")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 def invite_menu() -> InlineKeyboardMarkup:
     """Ссылку удобнее переслать, а не копировать руками."""
     builder = InlineKeyboardBuilder()

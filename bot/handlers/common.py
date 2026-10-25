@@ -10,9 +10,10 @@ from aiogram.types import CallbackQuery, Message
 from .. import analytics, texts
 from ..config import Settings
 from ..db import Repo
-from ..keyboards import back_to_menu, main_menu
-from ..tarot import SPREADS, deserialize
-from ..utils import fmt_date
+from ..keyboards import back_to_menu, history_menu, main_menu
+from ..tarot import SPREADS, deserialize, format_cards
+from ..utils import fmt_date, split_text
+from .auto import send_card_images
 from .invite import greet_guest
 
 router = Router(name="common")
@@ -82,6 +83,11 @@ async def cb_about(call: CallbackQuery, settings: Settings) -> None:
     await call.answer()
 
 
+def spread_title(spread_key: str) -> str:
+    spread = SPREADS.get(spread_key)
+    return spread.title if spread else spread_key
+
+
 @router.callback_query(F.data == "menu:history")
 async def cb_history(call: CallbackQuery, repo: Repo) -> None:
     readings = await repo.last_readings(call.from_user.id, limit=5)
@@ -92,20 +98,54 @@ async def cb_history(call: CallbackQuery, repo: Repo) -> None:
         return
 
     blocks = [texts.HISTORY_HEADER, ""]
+    buttons = []
     for reading in readings:
-        spread = SPREADS.get(reading.spread_key)
-        title = spread.title if spread else reading.spread_key
+        title = spread_title(reading.spread_key)
         drawn = deserialize(reading.cards)
         cards = ", ".join(item.title for item in drawn)
         blocks.append(f"<b>{fmt_date(reading.created_at)}</b> · {texts.esc(title)}")
         if reading.question:
             blocks.append(f"<i>{texts.esc(texts.short(reading.question, 90))}</i>")
-        blocks.append(texts.esc(cards))
+        if cards:
+            blocks.append(texts.esc(cards))
         blocks.append("")
+        buttons.append((reading.id, f"{fmt_date(reading.created_at)} · {title}"))
 
     if isinstance(call.message, Message):
-        await call.message.edit_text("\n".join(blocks).strip(), reply_markup=back_to_menu())
+        await call.message.edit_text(
+            "\n".join(blocks).strip(), reply_markup=history_menu(buttons)
+        )
     await call.answer()
+
+
+@router.callback_query(F.data.startswith("history:"))
+async def cb_history_one(call: CallbackQuery, repo: Repo, settings: Settings) -> None:
+    """Открывает прошлый расклад целиком: карты и тот самый разбор."""
+    await call.answer()
+    if not isinstance(call.message, Message):
+        return
+
+    reading = await repo.get_reading(int(call.data.split(":", 1)[1]))
+    # Чужой расклад по угаданному номеру — то же самое, что несуществующий
+    if reading is None or reading.user_id != call.from_user.id:
+        await call.message.answer(texts.NO_SUCH_READING, reply_markup=back_to_menu())
+        return
+
+    drawn = deserialize(reading.cards)
+    if drawn:
+        await send_card_images(call.message.bot, call.message.chat.id, drawn, repo, settings)
+        await call.message.answer(
+            format_cards(SPREADS[reading.spread_key], drawn, reading.question)
+            if reading.spread_key in SPREADS
+            else spread_title(reading.spread_key)
+        )
+
+    body = reading.interpretation or texts.READING_WITHOUT_TEXT
+    chunks = split_text(body)
+    for index, chunk in enumerate(chunks):
+        await call.message.answer(
+            chunk, reply_markup=back_to_menu() if index == len(chunks) - 1 else None
+        )
 
 
 @router.message(Command("chatid"))

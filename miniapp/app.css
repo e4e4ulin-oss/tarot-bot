@@ -253,6 +253,25 @@ body::after {
   text-align: right;
 }
 
+/* Строка истории — кнопка: прошлый расклад открывается целиком, с картами
+   и тем самым разбором. У кнопки свой сброс, иначе браузер даёт ей рамку,
+   свой шрифт и выравнивание по центру. */
+button.row {
+  width: 100%;
+  border: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+button.row:active {
+  background: rgba(24, 32, 60, 0.9);
+}
+button.row b {
+  color: var(--gold);
+  white-space: nowrap;
+}
+
 /* --- кнопки --- */
 
 .btn {

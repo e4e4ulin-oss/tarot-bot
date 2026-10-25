@@ -1245,3 +1245,65 @@ async def test_paying_for_a_reading_does_not_open_a_spread(env):
         await repo.add_payment(chat, 990, "RUB", "charge-natal", kind="natal_reading")
         assert await repo.unspent_payment(chat, "auto_reading") is None
         assert await repo.unspent_payment(chat, "natal_reading") is not None
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_a_past_reading_opens_from_the_history(env):
+    """Список, который нельзя открыть, — обещание без продолжения."""
+    from bot.tarot import draw_spread, get_spread, serialize
+
+    dp, bot, session, factory = env
+    chat = 1099
+    drawn = draw_spread(get_spread("ptf"))
+
+    async with factory() as db:
+        repo = Repo(db)
+        await repo.upsert_user(chat, None, "Клиент")
+        saved = await repo.save_reading(
+            user_id=chat,
+            spread_key="ptf",
+            question="про работу",
+            cards=serialize(drawn),
+            interpretation="Тот самый разбор.",
+            ai_used=True,
+        )
+
+    session.clear()
+    await feed(dp, bot, make_callback("menu:history", chat_id=chat), 1)
+
+    # В списке у каждого расклада своя кнопка
+    buttons = [
+        button.callback_data
+        for call in session.methods("EditMessageText")
+        for row in (call.reply_markup.inline_keyboard if call.reply_markup else [])
+        for button in row
+    ]
+    assert f"history:{saved.id}" in buttons
+
+    session.clear()
+    await feed(dp, bot, make_callback(f"history:{saved.id}", chat_id=chat), 2)
+
+    texts_sent = "\n".join(session.texts())
+    assert "Тот самый разбор." in texts_sent
+    assert drawn[0].card.name in texts_sent  # карты тоже вернулись
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_someone_elses_reading_does_not_open(env):
+    """Номер расклада можно угадать: чужой разбор по нему открываться не должен."""
+    dp, bot, session, factory = env
+
+    async with factory() as db:
+        repo = Repo(db)
+        await repo.upsert_user(2001, None, "Хозяин")
+        mine = await repo.save_reading(
+            user_id=2001, spread_key="day", question=None, cards=[],
+            interpretation="Личное.", ai_used=False,
+        )
+
+    session.clear()
+    await feed(dp, bot, make_callback(f"history:{mine.id}", chat_id=2002), 3)
+
+    said = "\n".join(session.texts())
+    assert "Личное." not in said
+    assert "нет" in said.lower()

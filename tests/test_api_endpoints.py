@@ -6,7 +6,7 @@ import pytest
 import pytest_asyncio
 from aiohttp.test_utils import TestClient, TestServer
 
-from bot.api.app import create_app
+from bot.api.app import SESSIONS, create_app
 from bot.config import Settings
 from bot.db import create_engine, create_session_factory, init_models
 from tests.test_api_auth import make_init_data
@@ -575,3 +575,57 @@ async def test_switching_a_code_off_stops_it_working(client):
 
     works = await client.post("/api/promo", headers=auth(user_id=CLIENT), data='{"code": "ПАУЗА"}')
     assert works.status == 200
+
+
+@pytest.mark.asyncio
+async def test_a_past_reading_opens_again(client):
+    """Разбор пишется один раз — перечитать его человек вправе."""
+    from bot.db import Repo
+    from bot.tarot import draw_spread, get_spread, serialize
+
+    drawn = draw_spread(get_spread("ptf"))
+    async with client.server.app[SESSIONS]() as session:
+        repo = Repo(session)
+        await repo.upsert_user(321, None, "Клиент")
+        saved = await repo.save_reading(
+            user_id=321,
+            spread_key="ptf",
+            question="про работу",
+            cards=serialize(drawn),
+            interpretation="Тот самый разбор.",
+            ai_used=True,
+        )
+
+    res = await client.get(f"/api/readings/{saved.id}", headers=auth(user_id=321))
+    assert res.status == 200
+
+    data = await res.json()
+    assert data["title"] == "Прошлое — Настоящее — Будущее"
+    assert data["question"] == "про работу"
+    assert data["text"] == "Тот самый разбор."
+    assert len(data["cards"]) == 3
+    # Карты те же и в том же порядке, с картинкой и позицией
+    assert [card["id"] for card in data["cards"]] == [item.card.id for item in drawn]
+    assert data["cards"][0]["image"].startswith("cards/")
+    assert data["cards"][0]["position"] == "Прошлое"
+
+
+@pytest.mark.asyncio
+async def test_someone_elses_reading_is_simply_not_found(client):
+    """Чужой и несуществующий отвечают одинаково: иначе чужие пересчитываются."""
+    from bot.db import Repo
+
+    async with client.server.app[SESSIONS]() as session:
+        repo = Repo(session)
+        await repo.upsert_user(401, None, "Хозяин")
+        mine = await repo.save_reading(
+            user_id=401, spread_key="day", question=None, cards=[],
+            interpretation="Личное.", ai_used=False,
+        )
+
+    stranger = await client.get(f"/api/readings/{mine.id}", headers=auth(user_id=402))
+    missing = await client.get("/api/readings/999999", headers=auth(user_id=402))
+    nonsense = await client.get("/api/readings/абв", headers=auth(user_id=402))
+
+    assert stranger.status == missing.status == nonsense.status == 404
+    assert (await stranger.json()) == (await missing.json())
