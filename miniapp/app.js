@@ -188,6 +188,16 @@
     },
 
     async profile() {
+      await profileView();
+    },
+  };
+
+  /* --- кабинет: данные рождения, натальная карта, прогноз ------------------
+     Небо считается по дате, времени и городу: без них карта не строится,
+     поэтому кабинет и начинается с них. */
+
+  const profileRender = {
+    async main() {
       const body = $("#profile-body");
       try {
         const me = await api("me");
@@ -223,6 +233,19 @@
             <div class="row"><span>Город</span><b>${esc(me.city || me.birth.city || "не указан")}</b></div>
           </div>
 
+          <div class="card tap" data-go="edit">
+            <h3>Данные рождения</h3>
+            <p>${me.birth.date ? "Изменить дату, время и город" : "Заполните — и небо посчитается"}</p>
+          </div>
+          <div class="card tap" data-go="chart">
+            <h3>Натальная карта</h3>
+            <p>Солнце, Луна, асцендент и аспекты</p>
+          </div>
+          <div class="card tap" data-go="forecast">
+            <h3>Прогноз</h3>
+            <p>Что происходит с вашей картой сейчас</p>
+          </div>
+
           <h3 style="font-family:var(--serif);font-weight:500;margin:18px 2px 10px">История</h3>
           <div class="rows">${history}</div>
           ${
@@ -230,11 +253,186 @@
               ? `<p class="note">Заявка №${me.open_order.id} в работе с ${esc(dateLabel(me.open_order.created_at))}.</p>`
               : ""
           }`;
+
+        body.querySelectorAll("[data-go]").forEach((node) =>
+          node.addEventListener("click", () => {
+            tap();
+            profileView(node.dataset.go, me);
+          })
+        );
+      } catch (err) {
+        fail(body, err);
+      }
+    },
+
+    async edit(me) {
+      const body = $("#profile-body");
+      const birth = (me && me.birth) || {};
+      body.innerHTML = `
+        ${backLink("В кабинет", "p-back")}
+        <h3 style="font-family:var(--serif);font-weight:500;font-size:22px;margin:0 0 4px">Данные рождения</h3>
+        <p class="lead">Всё необязательно. Чем больше известно, тем точнее карта: без времени не будет домов, без города — асцендента.</p>
+        <label class="note">Дата рождения</label>
+        <input class="field one-line plain" id="p-date"
+               placeholder="25.07.1992" value="${esc(birth.date ? isoToRu(birth.date) : "")}">
+        <label class="note">Время рождения</label>
+        <input class="field one-line plain" id="p-time"
+               placeholder="14:30" value="${esc(birth.time || "")}">
+        <label class="note">Город рождения</label>
+        <input class="field one-line plain" id="p-city"
+               placeholder="Саратов" value="${esc(birth.city || "")}">
+        <div id="p-cities"></div>
+        <button class="btn" id="p-save" style="margin-top:6px">Сохранить</button>
+        <p class="note" id="p-msg"></p>`;
+
+      $("#p-back").addEventListener("click", () => {
+        tap();
+        profileView("main");
+      });
+
+      $("#p-save").addEventListener("click", async () => {
+        const button = $("#p-save");
+        button.disabled = true;
+        tap();
+        try {
+          const saved = await api("profile", {
+            method: "PUT",
+            body: JSON.stringify({
+              birth_date: $("#p-date").value,
+              birth_time: $("#p-time").value,
+              birth_city: $("#p-city").value,
+              place_id: chosenPlace,
+            }),
+          });
+          if (saved.ambiguous) {
+            await showNamesakes($("#p-city").value);
+            $("#p-msg").textContent = "Городов с таким названием несколько — выберите свой.";
+          } else {
+            $("#p-msg").textContent = "Сохранено.";
+            loaded.delete("profile");
+            setTimeout(() => profileView("main"), 700);
+          }
+        } catch (err) {
+          $("#p-msg").textContent = err.message;
+        } finally {
+          button.disabled = false;
+        }
+      });
+    },
+
+    async chart() {
+      const body = $("#profile-body");
+      body.innerHTML = `${backLink("В кабинет", "p-back")}<p class="waiting">Считаю карту…</p>`;
+      $("#p-back").addEventListener("click", () => {
+        tap();
+        profileView("main");
+      });
+      try {
+        const data = await api("chart");
+        const tail = !data.ready
+          ? `<div class="card"><h3>Нужна дата рождения</h3><p>Заполните её в кабинете — и карта посчитается.</p></div>`
+          : `<div class="card"><div class="reading">${data.lines.map(esc).join("\n")}</div>
+               ${data.has_houses ? "" : '<p class="note">Без точного времени и города дома не считаются — показаны только планеты и аспекты.</p>'}
+             </div>`;
+        body.innerHTML = `${backLink("В кабинет", "p-back")}
+          <h3 style="font-family:var(--serif);font-weight:500;font-size:22px;margin:0 0 10px">Натальная карта</h3>
+          ${tail}`;
+        $("#p-back").addEventListener("click", () => {
+          tap();
+          profileView("main");
+        });
+      } catch (err) {
+        fail(body, err);
+      }
+    },
+
+    async forecast() {
+      const body = $("#profile-body");
+      const head = `${backLink("В кабинет", "p-back")}
+        <h3 style="font-family:var(--serif);font-weight:500;font-size:22px;margin:0 0 10px">Прогноз</h3>`;
+      body.innerHTML = `${head}<p class="waiting">Смотрю транзиты…</p>`;
+      $("#p-back").addEventListener("click", () => {
+        tap();
+        profileView("main");
+      });
+
+      try {
+        const data = await api("forecast");
+        if (!data.ready) {
+          body.innerHTML = `${head}<div class="card"><h3>Нужна дата рождения</h3><p>Без неё смотреть не на что.</p></div>`;
+          bindProfileBack();
+          return;
+        }
+        if (data.quiet) {
+          body.innerHTML = `${head}<div class="card"><h3>Сейчас тихо</h3><p>Крупных транзитов к вашей карте нет — спокойный период.</p></div>`;
+          bindProfileBack();
+          return;
+        }
+
+        body.innerHTML = `${head}
+          <div class="card">
+            ${data.transits
+              .map(
+                (t) => `<p style="margin:0 0 10px"><b style="color:var(--gold)">${esc(t.title)}</b><br>
+                        <span class="note">${esc(t.timing)}</span></p>`
+              )
+              .join("")}
+          </div>
+          <div class="card" id="p-text"><p class="waiting">Пишу разбор…</p></div>`;
+        bindProfileBack();
+
+        const slot = $("#p-text");
+        const written = await api("forecast", { method: "POST" });
+        slot.innerHTML = written.text
+          ? `<div class="reading">${written.text}</div>`
+          : "<p>Разбор к транзитам сейчас недоступен — модель не ответила.</p>";
       } catch (err) {
         fail(body, err);
       }
     },
   };
+
+  let chosenPlace = null;
+
+  function bindProfileBack() {
+    const back = $("#p-back");
+    if (back) {
+      back.addEventListener("click", () => {
+        tap();
+        profileView("main");
+      });
+    }
+  }
+
+  async function showNamesakes(query) {
+    const box = $("#p-cities");
+    const data = await api(`cities?q=${encodeURIComponent(query)}`);
+    box.innerHTML = data.cities
+      .map(
+        (city) =>
+          `<button class="chip" data-place="${city.id}">${esc(city.name)} · ${esc(city.hint)}</button>`
+      )
+      .join("");
+    box.querySelectorAll("[data-place]").forEach((node) =>
+      node.addEventListener("click", () => {
+        tap();
+        chosenPlace = Number(node.dataset.place);
+        box.querySelectorAll("[data-place]").forEach((other) => other.classList.remove("on"));
+        node.classList.add("on");
+      })
+    );
+  }
+
+  const isoToRu = (iso) => {
+    if (!iso) return "";
+    const [y, m, d] = iso.split("-");
+    return `${d}.${m}.${y}`;
+  };
+
+  async function profileView(view = "main", me = null) {
+    chosenPlace = view === "edit" ? chosenPlace : null;
+    await profileRender[view](me);
+  }
 
   /* --- расклад: раскладка → вопрос → число → карты → разбор ---------------
      Четыре шага живут в одном экране, потому что это один разговор: уйти
@@ -242,8 +440,8 @@
 
   let flow = null;
 
-  const backLink = (label) =>
-    `<button class="back-link" id="flow-back">
+  const backLink = (label, id = "flow-back") =>
+    `<button class="back-link" id="${id}">
        <svg><use href="assets/icons.svg#i-back"></use></svg>${esc(label)}
      </button>`;
 

@@ -16,17 +16,23 @@ import secrets
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from aiohttp import web
 
-from .. import analytics
+from .. import analytics, geo
+from .. import profile as profile_parse
 from ..config import Settings
 from ..db import Repo
+from ..natal import forecast as natal_forecast
+from ..natal import full as natal_full
+from ..natal import timeline as natal_timeline
+from ..profile import describe, stored_place
 from ..schedule import now
 from ..services import reading as reading_rules
 from ..services.daily import card_of_the_day
-from ..services.grok import GrokClient
+from ..services.grok import GrokClient, GrokError
 from ..services.interpreter import Interpreter
 from ..tarot import SPREAD_ORDER, SPREADS, DrawnCard, get_spread
 from ..tiers import tiers as author_tiers
@@ -305,6 +311,191 @@ async def handle_daily_subscription(request: web.Request) -> web.Response:
     return json_ok({"subscribed": not subscribed})
 
 
+async def handle_cities(request: web.Request) -> web.Response:
+    """Подсказки городов. Город рождения отвечает за асцендент, тёзок надо различать."""
+    query = (request.query.get("q") or "").strip()
+    if len(query) < 2:
+        return json_ok({"cities": []})
+    found = geo.find_all(query)[:8]
+    return json_ok(
+        {
+            "cities": [
+                {
+                    "id": place.geonameid,
+                    "name": place.name,
+                    "hint": place.hint,
+                    "country": place.country,
+                }
+                for place in found
+            ]
+        }
+    )
+
+
+async def handle_profile_save(request: web.Request) -> web.Response:
+    """Данные рождения. Всё необязательно: сколько открыли, настолько и подробнее разбор."""
+    identity: Identity = request[IDENTITY]
+    session_factory = request.app[SESSIONS]
+
+    try:
+        payload = await request.json()
+    except Exception:
+        return json_error("Не разобрал запрос")
+
+    fields: dict[str, Any] = {}
+    errors: list[str] = []
+
+    if "birth_date" in payload:
+        raw = (payload.get("birth_date") or "").strip()
+        if not raw:
+            fields["birth_date"] = None
+        else:
+            parsed = profile_parse.parse_date(raw)
+            if parsed is None:
+                errors.append("дата рождения")
+            else:
+                fields["birth_date"] = parsed
+
+    if "birth_time" in payload:
+        raw = (payload.get("birth_time") or "").strip()
+        if not raw:
+            fields["birth_time"] = None
+        else:
+            parsed_time = profile_parse.parse_time(raw)
+            if parsed_time is None:
+                errors.append("время рождения")
+            else:
+                fields["birth_time"] = parsed_time
+
+    if "city" in payload:
+        fields["city"] = (payload.get("city") or "").strip() or None
+
+    place = None
+    if "birth_city" in payload:
+        raw = (payload.get("birth_city") or "").strip()
+        fields["birth_city"] = raw or None
+        # Координаты и пояс сохраняем вместе с названием: справочник меняется,
+        # а небо человека меняться не должно
+        if raw:
+            chosen = payload.get("place_id")
+            place = geo.by_id(int(chosen)) if chosen else None
+            if place is None:
+                matches = geo.find_all(raw)
+                place = matches[0] if len(matches) == 1 else None
+        fields["birth_lat"] = place.latitude if place else None
+        fields["birth_lon"] = place.longitude if place else None
+        fields["birth_tz"] = place.timezone if place else None
+
+    if errors:
+        return json_error("Не понял: " + ", ".join(errors))
+
+    async with session_factory() as session:
+        repo = Repo(session, tenant_id=identity.tenant_id)
+        await repo.upsert_user(identity.user.id, identity.user.username, identity.user.first_name)
+        if fields:
+            await repo.save_profile(identity.user.id, **fields)
+        user = await repo.get_user(identity.user.id)
+
+    ambiguous = bool(
+        fields.get("birth_city") and place is None and len(geo.find_all(fields["birth_city"])) > 1
+    )
+    return json_ok(
+        {
+            "saved": True,
+            "birth": {
+                "date": user.birth_date.isoformat() if user.birth_date else None,
+                "time": user.birth_time,
+                "city": user.birth_city,
+                "located": user.birth_lat is not None,
+            },
+            "city": user.city,
+            "ambiguous": ambiguous,
+        }
+    )
+
+
+async def natal_card(repo: Repo, user_id: int):
+    """Натальная карта по сохранённому профилю или ничего, если даты нет."""
+    user = await repo.get_user(user_id)
+    if user is None or user.birth_date is None:
+        return None
+    return natal_full(user.birth_date, user.birth_time, user.birth_city, place=stored_place(user))
+
+
+async def handle_chart(request: web.Request) -> web.Response:
+    identity: Identity = request[IDENTITY]
+    session_factory = request.app[SESSIONS]
+
+    async with session_factory() as session:
+        repo = Repo(session, tenant_id=identity.tenant_id)
+        card = await natal_card(repo, identity.user.id)
+
+    if card is None:
+        return json_ok({"ready": False})
+    return json_ok(
+        {
+            "ready": True,
+            "lines": card.lines(),
+            "has_houses": card.has_houses,
+        }
+    )
+
+
+async def handle_forecast(request: web.Request) -> web.Response:
+    """Транзиты сейчас. Текст к ним пишет модель — отдельным запросом."""
+    identity: Identity = request[IDENTITY]
+    session_factory = request.app[SESSIONS]
+
+    async with session_factory() as session:
+        repo = Repo(session, tenant_id=identity.tenant_id)
+        card = await natal_card(repo, identity.user.id)
+
+    if card is None:
+        return json_ok({"ready": False})
+
+    moment = datetime.now(UTC).replace(tzinfo=None)
+    moving = natal_forecast(card, moment)
+    return json_ok(
+        {
+            "ready": True,
+            "quiet": not moving,
+            "transits": [
+                {"title": str(transit), "timing": natal_timeline(transit, card, moment)}
+                for transit in moving
+            ],
+        }
+    )
+
+
+async def handle_forecast_text(request: web.Request) -> web.Response:
+    identity: Identity = request[IDENTITY]
+    session_factory = request.app[SESSIONS]
+    interpreter: Interpreter = request.app[INTERPRETER]
+
+    async with session_factory() as session:
+        repo = Repo(session, tenant_id=identity.tenant_id)
+        card = await natal_card(repo, identity.user.id)
+        user = await repo.get_user(identity.user.id)
+
+    if card is None:
+        return json_error("Сначала заполните дату рождения", 409, "no_birth_date")
+
+    moment = datetime.now(UTC).replace(tzinfo=None)
+    moving = natal_forecast(card, moment)
+    if not moving:
+        return json_ok({"text": None, "quiet": True})
+
+    body = "\n".join(f"{transit}\n   {natal_timeline(transit, card, moment)}" for transit in moving)
+    try:
+        written = await interpreter.forecast(
+            "\n".join(card.lines(aspects_limit=6)), body, describe(user)
+        )
+        return json_ok({"text": written.text, "quiet": False})
+    except (GrokError, TimeoutError):
+        logger.warning("Прогноз без текста: модель недоступна")
+        return json_ok({"text": None, "quiet": False, "unavailable": True})
+
+
 @dataclass
 class Pending:
     """Расклад, который лёг, но разбор к нему ещё не заказан."""
@@ -456,6 +647,11 @@ def create_app(
     app.router.add_post("/api/daily/subscription", handle_daily_subscription)
     app.router.add_post("/api/reading", handle_reading_start)
     app.router.add_post("/api/reading/{token}/interpretation", handle_reading_finish)
+    app.router.add_get("/api/cities", handle_cities)
+    app.router.add_put("/api/profile", handle_profile_save)
+    app.router.add_get("/api/chart", handle_chart)
+    app.router.add_get("/api/forecast", handle_forecast)
+    app.router.add_post("/api/forecast", handle_forecast_text)
     return app
 
 

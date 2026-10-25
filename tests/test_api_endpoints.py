@@ -226,3 +226,85 @@ async def test_free_readings_run_out(client):
     # Отказ приходит обычным ответом: приложению надо показать, чего не хватает
     assert refused["allowed"] is False
     assert refused["reason"] in ("needs_payment", "payment_not_ready", "needs_daily")
+
+
+@pytest.mark.asyncio
+async def test_city_is_found_by_name(client):
+    res = await client.get("/api/cities?q=Саратов", headers=auth(user_id=31))
+    assert res.status == 200
+    cities = (await res.json())["cities"]
+    # Справочник ищет по названию целиком и отвечает латиницей,
+    # как его и собрали: нам важны координаты и пояс, а не написание
+    assert len(cities) == 1
+    assert cities[0]["name"] == "Saratov"
+    assert cities[0]["id"]
+
+
+@pytest.mark.asyncio
+async def test_namesakes_come_back_together(client):
+    res = await client.get("/api/cities?q=Москва", headers=auth(user_id=31))
+    cities = (await res.json())["cities"]
+    # Тёзок двое — выбор остаётся за человеком, сами не угадываем
+    assert len(cities) > 1
+
+
+@pytest.mark.asyncio
+async def test_short_query_suggests_nothing(client):
+    res = await client.get("/api/cities?q=с", headers=auth(user_id=31))
+    assert (await res.json())["cities"] == []
+
+
+@pytest.mark.asyncio
+async def test_profile_saves_birth_data_and_locates_city(client):
+    res = await client.put(
+        "/api/profile",
+        headers=auth(user_id=32),
+        json={"birth_date": "25.07.1992", "birth_time": "14:30", "birth_city": "Саратов"},
+    )
+    assert res.status == 200
+    data = await res.json()
+    assert data["birth"]["date"] == "1992-07-25"
+    assert data["birth"]["time"] == "14:30"
+    # Координаты нашлись — значит асцендент посчитается
+    assert data["birth"]["located"] is True
+
+
+@pytest.mark.asyncio
+async def test_profile_refuses_nonsense_date(client):
+    res = await client.put(
+        "/api/profile", headers=auth(user_id=33), json={"birth_date": "тридцатое"}
+    )
+    assert res.status == 400
+
+
+@pytest.mark.asyncio
+async def test_chart_waits_for_the_birth_date(client):
+    res = await client.get("/api/chart", headers=auth(user_id=34))
+    assert (await res.json())["ready"] is False
+
+
+@pytest.mark.asyncio
+async def test_chart_is_built_once_the_date_is_known(client):
+    await client.put(
+        "/api/profile",
+        headers=auth(user_id=35),
+        json={"birth_date": "25.07.1992", "birth_time": "14:30", "birth_city": "Саратов"},
+    )
+    data = await (await client.get("/api/chart", headers=auth(user_id=35))).json()
+    assert data["ready"] is True
+    assert any("Солнце" in line for line in data["lines"])
+    # Время и город известны — дома считаются
+    assert data["has_houses"] is True
+
+
+@pytest.mark.asyncio
+async def test_forecast_follows_the_chart(client):
+    empty = await (await client.get("/api/forecast", headers=auth(user_id=36))).json()
+    assert empty["ready"] is False
+
+    await client.put(
+        "/api/profile", headers=auth(user_id=36), json={"birth_date": "25.07.1992"}
+    )
+    data = await (await client.get("/api/forecast", headers=auth(user_id=36))).json()
+    assert data["ready"] is True
+    assert isinstance(data["transits"], list)
