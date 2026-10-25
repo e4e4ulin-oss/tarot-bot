@@ -273,3 +273,27 @@ def test_the_deck_page_has_a_way_back():
     # Кнопка Telegram включается сразу, а не только при открытой карте
     assert "tg.BackButton.show();" in text
     assert "BackButton.hide" not in text
+
+
+def test_the_deck_carries_the_same_tabs_as_the_app():
+    """Колода — отдельная страница, и панель вкладок на ней своя.
+
+    Значит она может отстать: добавят вкладку в приложение, а здесь её не
+    будет, и человек из колоды в новый экран не попадёт. Списки держатся
+    вместе проверкой, а не памятью.
+    """
+    import re
+    from pathlib import Path
+
+    folder = Path(__file__).resolve().parents[1] / "miniapp"
+    names = {
+        page: re.findall(r'class="tab[^"]*" data-go="(\w+)"', (folder / page).read_text("utf-8"))
+        for page in ("index.html", "deck.html")
+    }
+
+    assert names["deck.html"], "на странице колоды нет панели вкладок"
+    assert names["deck.html"] == names["index.html"]
+
+    deck = (folder / "deck.html").read_text("utf-8")
+    # Текущая вкладка подсвечена, и это именно колода
+    assert 'class="tab on" data-go="deck"' in deck
