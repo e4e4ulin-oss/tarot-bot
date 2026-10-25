@@ -279,6 +279,18 @@ body::after {
   cursor: default;
 }
 
+/* Кнопка внутри карточки кода: действие второстепенное, и места ей надо мало */
+.btn.small {
+  min-height: 40px;
+  margin: 10px 0 0;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+}
+/* Выключенный код не прячут: его уже кому-то назвали, и он должен быть виден */
+.card.off {
+  opacity: 0.55;
+}
+
 .btn.ghost {
   background: transparent;
   border: 1px solid var(--line);

@@ -28,12 +28,20 @@ class Access:
     payment: Payment | None = None
 
 
+def owns(settings: Settings, user_id: int) -> bool:
+    """Это владелец бота или его администратор.
+
+    ADMIN_CHAT_ID в личной переписке совпадает с номером человека, поэтому
+    владелец остаётся владельцем, даже если забыл вписать себя в ADMIN_IDS.
+    Правило одно на всех — и для лимита раскладов, и для хозяйских экранов.
+    """
+    return settings.is_admin(user_id) or user_id == settings.admin_chat_id
+
+
 async def check(repo: Repo, settings: Settings, user_id: int) -> Access:
     # Владелец бота и его администраторы раскладывают сколько нужно: лимит
     # придуман для клиентов, а им самим он мешает смотреть, как работает бот
-    # ADMIN_CHAT_ID в личной переписке совпадает с номером человека, поэтому
-    # владелец остаётся владельцем, даже если забыл вписать себя в ADMIN_IDS
-    if settings.is_admin(user_id) or user_id == settings.admin_chat_id:
+    if owns(settings, user_id):
         return Access(True, "owner", free_left=0)
 
     used = await repo.count_auto_readings(user_id)

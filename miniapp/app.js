@@ -230,6 +230,14 @@
             <h3>Пригласить друга</h3>
             <p>Бесплатные расклады вам и ему${r.bonus ? ` · сейчас ${r.bonus} в запасе` : ""}</p>
           </div>
+          ${
+            me.admin
+              ? `<div class="card tap" data-go="promos">
+                   <h3>Промокоды</h3>
+                   <p>Завести код и посмотреть, сколько раз его взяли</p>
+                 </div>`
+              : ""
+          }
 
           <h3 style="font-family:var(--serif);font-weight:500;margin:18px 2px 10px">История</h3>
           <div class="rows">${history}</div>
@@ -467,6 +475,96 @@
         }
         button.disabled = false;
       });
+    } catch (err) {
+      fail(body, err);
+    }
+  };
+
+  /* Хозяйский экран: список кодов и форма нового. Кнопка спрятана от клиента,
+     но решает не вёрстка — сервер проверяет сам и чужому отвечает отказом. */
+  profileRender.promos = async function promosView() {
+    const body = $("#profile-body");
+    const head = `${backLink("В кабинет", "p-back")}
+      <h3 style="font-family:var(--serif);font-weight:500;font-size:22px;margin:0 0 10px">Промокоды</h3>`;
+    body.innerHTML = `${head}<p class="waiting">Смотрю, что уже заведено…</p>`;
+    bindProfileBack();
+
+    const line = (item) => {
+      const taken = item.uses_limit ? `${item.used} из ${item.uses_limit}` : `${item.used}`;
+      const until = item.expires_at ? ` · до ${dateLabel(item.expires_at)}` : "";
+      return `
+        <div class="card${item.active ? "" : " off"}">
+          <h3>${esc(item.code)} — ${item.readings} ${plural(item.readings, "расклад", "расклада", "раскладов")}</h3>
+          <p>Взяли: ${taken}${until}${item.active ? "" : " · выключен"}</p>
+          <button class="btn ghost small" data-toggle="${item.id}" data-active="${item.active ? 1 : 0}">
+            ${item.active ? "Выключить" : "Включить"}
+          </button>
+        </div>`;
+    };
+
+    const draw = (codes) => {
+      body.innerHTML = `${head}
+        <div id="pr-list">
+          ${codes.length ? codes.map(line).join("") : '<p class="lead">Кодов пока нет.</p>'}
+        </div>
+
+        <h3 style="font-family:var(--serif);font-weight:500;font-size:20px;margin:18px 0 8px">Новый код</h3>
+        <input class="field one-line plain" id="pr-code" placeholder="ОСЕНЬ"
+               autocapitalize="characters" autocomplete="off" spellcheck="false">
+        <label class="note">Сколько раскладов даёт</label>
+        <input class="field one-line plain" id="pr-readings" inputmode="numeric" value="3">
+        <label class="note">Сколько раз можно взять — пусто значит без ограничения</label>
+        <input class="field one-line plain" id="pr-limit" inputmode="numeric" placeholder="100">
+        <label class="note">Действует до — пусто значит бессрочно</label>
+        <input class="field one-line plain" id="pr-until" placeholder="2027-01-31">
+        <button class="btn" id="pr-add">Завести код</button>
+        <p class="note" id="pr-msg"></p>`;
+      bindProfileBack();
+
+      body.querySelectorAll("[data-toggle]").forEach((button) =>
+        button.addEventListener("click", async () => {
+          tap();
+          button.disabled = true;
+          try {
+            await api(`admin/promos/${button.dataset.toggle}/active`, {
+              method: "POST",
+              body: JSON.stringify({ active: button.dataset.active !== "1" }),
+            });
+            draw((await api("admin/promos")).codes);
+          } catch (err) {
+            $("#pr-msg").textContent = err.message;
+            button.disabled = false;
+          }
+        })
+      );
+
+      $("#pr-add").addEventListener("click", async () => {
+        const button = $("#pr-add");
+        const note = $("#pr-msg");
+        button.disabled = true;
+        note.textContent = "";
+        try {
+          await api("admin/promos", {
+            method: "POST",
+            body: JSON.stringify({
+              code: ($("#pr-code").value || "").trim(),
+              readings: Number($("#pr-readings").value || 0),
+              uses_limit: Number($("#pr-limit").value || 0),
+              expires_at: ($("#pr-until").value || "").trim(),
+            }),
+          });
+          tap("medium");
+          draw((await api("admin/promos")).codes);
+          $("#pr-msg").textContent = "Код заведён.";
+        } catch (err) {
+          note.textContent = err.message;
+          button.disabled = false;
+        }
+      });
+    };
+
+    try {
+      draw((await api("admin/promos")).codes);
     } catch (err) {
       fail(body, err);
     }

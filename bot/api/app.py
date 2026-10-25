@@ -16,7 +16,7 @@ import secrets
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from aiogram import Bot
@@ -27,6 +27,7 @@ from .. import analytics, geo, referrals, texts
 from .. import profile as profile_parse
 from .. import promo as promo_rules
 from ..access import check as check_access
+from ..access import owns
 from ..config import Settings
 from ..db import Repo
 from ..db.models import OrderStatus, ReadingMode
@@ -224,6 +225,8 @@ async def handle_me(request: web.Request) -> web.Response:
             },
             "city": user.city,
             "daily_subscribed": subscribed,
+            # Хозяйские экраны прячутся от клиентов, но решает всё равно сервер
+            "admin": owns(settings, identity.user.id),
             "readings": {
                 "used": used,
                 "free_left": left,
@@ -745,6 +748,115 @@ async def handle_promo(request: web.Request) -> web.Response:
     )
 
 
+# --- Хозяйские экраны ----------------------------------------------------
+# Прятать кнопку мало: данные отдаёт сервер, и проверять он обязан сам.
+
+
+def promo_json(promo) -> dict[str, Any]:
+    return {
+        "id": promo.id,
+        "code": promo.code,
+        "readings": promo.readings,
+        "uses_limit": promo.uses_limit,
+        "used": promo.used,
+        "expires_at": promo.expires_at.isoformat() if promo.expires_at else None,
+        "active": promo.active,
+        "note": promo.note,
+    }
+
+
+def deny_stranger(request: web.Request) -> web.Response | None:
+    identity: Identity = request[IDENTITY]
+    settings: Settings = request[BRAND]
+    if owns(settings, identity.user.id):
+        return None
+    return json_error("Это хозяйский экран", 403, "forbidden")
+
+
+async def handle_promos_list(request: web.Request) -> web.Response:
+    if (refusal := deny_stranger(request)) is not None:
+        return refusal
+
+    identity: Identity = request[IDENTITY]
+    async with request.app[SESSIONS]() as session:
+        codes = await Repo(session, tenant_id=identity.tenant_id).promos()
+    return json_ok({"codes": [promo_json(code) for code in codes]})
+
+
+# Щедрость с опечаткой — это подарок, который не отменить: ограничиваем заранее
+MAX_READINGS = 100
+MAX_USES = 100000
+
+
+async def handle_promo_create(request: web.Request) -> web.Response:
+    if (refusal := deny_stranger(request)) is not None:
+        return refusal
+
+    identity: Identity = request[IDENTITY]
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    code = promo_rules.normalize(str(payload.get("code") or ""))
+    if not code:
+        return json_error("Нужно слово для кода", 400, "empty")
+
+    try:
+        readings = int(payload.get("readings") or 0)
+    except (TypeError, ValueError):
+        readings = 0
+    if not 1 <= readings <= MAX_READINGS:
+        return json_error(f"Раскладов должно быть от 1 до {MAX_READINGS}", 400, "readings")
+
+    try:
+        uses_limit = int(payload.get("uses_limit") or 0)
+    except (TypeError, ValueError):
+        uses_limit = -1
+    if not 0 <= uses_limit <= MAX_USES:
+        return json_error("Ограничение задано неверно", 400, "uses_limit")
+
+    expires = None
+    raw_date = (payload.get("expires_at") or "").strip()
+    if raw_date:
+        try:
+            expires = date.fromisoformat(raw_date)
+        except ValueError:
+            return json_error("Дата в виде ГГГГ-ММ-ДД", 400, "expires_at")
+
+    async with request.app[SESSIONS]() as session:
+        repo = Repo(session, tenant_id=identity.tenant_id)
+        if await repo.promo_by_code(code) is not None:
+            return json_error("Такой код уже есть", 409, "exists")
+        promo = await repo.add_promo(
+            code, readings, uses_limit, expires, (payload.get("note") or "").strip() or None
+        )
+        created = promo_json(promo)
+
+    return json_ok(created, status=201)
+
+
+async def handle_promo_toggle(request: web.Request) -> web.Response:
+    """Код выключается, но не удаляется: кому-то его уже обещали."""
+    if (refusal := deny_stranger(request)) is not None:
+        return refusal
+
+    identity: Identity = request[IDENTITY]
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    async with request.app[SESSIONS]() as session:
+        repo = Repo(session, tenant_id=identity.tenant_id)
+        codes = {item.id: item for item in await repo.promos(limit=200)}
+        promo = codes.get(int(request.match_info["promo_id"]))
+        if promo is None:
+            return json_error("Такого кода нет", 404, "unknown")
+        await repo.set_promo_active(promo, bool(payload.get("active")))
+        return json_ok(promo_json(promo))
+
+
 async def handle_invoice(request: web.Request) -> web.Response:
     """Ссылка на оплату. Открывает её само приложение — Telegram умеет это сам."""
     identity: Identity = request[IDENTITY]
@@ -977,6 +1089,9 @@ def create_app(
     app.router.add_post("/api/order", handle_order_create)
     app.router.add_delete("/api/order/{order_id}", handle_order_cancel)
     app.router.add_get("/api/invite", handle_invite)
+    app.router.add_get("/api/admin/promos", handle_promos_list)
+    app.router.add_post("/api/admin/promos", handle_promo_create)
+    app.router.add_post("/api/admin/promos/{promo_id}/active", handle_promo_toggle)
     app.router.add_post("/api/promo", handle_promo)
     app.router.add_post("/api/invoice", handle_invoice)
     return app

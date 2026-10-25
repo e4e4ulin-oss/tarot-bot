@@ -386,7 +386,7 @@ class FakeBot:
         username = "Taroautorasklad_bot"
         id = 1
 
-    async def me(self) -> "FakeBot.Me":
+    async def me(self) -> Me:
         return self.Me()
 
 
@@ -466,3 +466,112 @@ async def test_the_cabinet_counts_the_earned_readings(client_with_bot):
 
     assert data["readings"]["bonus"] == 2
     assert data["readings"]["free_limit"] == data["readings"]["free_left"] >= 2
+
+
+# --- Хозяйский экран промокодов ------------------------------------------
+OWNER = 1  # он же в ADMIN_IDS, см. tests/conftest.py
+CLIENT = 77
+
+
+@pytest.mark.asyncio
+async def test_the_cabinet_says_who_is_the_owner(client):
+    mine = await (await client.get("/api/me", headers=auth(user_id=OWNER))).json()
+    theirs = await (await client.get("/api/me", headers=auth(user_id=CLIENT))).json()
+
+    assert mine["admin"] is True
+    assert theirs["admin"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_client_cannot_see_or_make_codes(client):
+    """Спрятать кнопку мало: проверяет сервер, а не вёрстка."""
+    listing = await client.get("/api/admin/promos", headers=auth(user_id=CLIENT))
+    assert listing.status == 403
+
+    made = await client.post(
+        "/api/admin/promos",
+        headers=auth(user_id=CLIENT),
+        data='{"code": "ЧУЖОЙ", "readings": 50}',
+    )
+    assert made.status == 403
+
+    # И список остался пустым: отказ был отказом, а не тихим созданием
+    owner_sees = await (await client.get("/api/admin/promos", headers=auth(user_id=OWNER))).json()
+    assert owner_sees["codes"] == []
+
+
+@pytest.mark.asyncio
+async def test_the_owner_creates_a_code_and_sees_it_in_the_list(client):
+    made = await client.post(
+        "/api/admin/promos",
+        headers=auth(user_id=OWNER),
+        data='{"code": "осень", "readings": 3, "uses_limit": 10, "expires_at": "2027-01-31"}',
+    )
+    assert made.status == 201
+    created = await made.json()
+    assert created["code"] == "ОСЕНЬ" and created["readings"] == 3
+    assert created["used"] == 0 and created["active"] is True
+
+    listing = await (await client.get("/api/admin/promos", headers=auth(user_id=OWNER))).json()
+    assert [item["code"] for item in listing["codes"]] == ["ОСЕНЬ"]
+
+    # Второй раз тем же словом — отказ, а не второй код
+    again = await client.post(
+        "/api/admin/promos", headers=auth(user_id=OWNER), data='{"code": "ОСЕНЬ", "readings": 1}'
+    )
+    assert again.status == 409
+
+
+@pytest.mark.asyncio
+async def test_a_slip_of_the_finger_does_not_become_a_gift(client):
+    """Щедрость с опечаткой не отменить: сто раскладов уже у человека."""
+    too_much = await client.post(
+        "/api/admin/promos", headers=auth(user_id=OWNER), data='{"code": "ОЙ", "readings": 5000}'
+    )
+    assert too_much.status == 400 and (await too_much.json())["error"] == "readings"
+
+    nothing = await client.post(
+        "/api/admin/promos", headers=auth(user_id=OWNER), data='{"code": "  ", "readings": 2}'
+    )
+    assert nothing.status == 400 and (await nothing.json())["error"] == "empty"
+
+    bad_date = await client.post(
+        "/api/admin/promos",
+        headers=auth(user_id=OWNER),
+        data='{"code": "КОГДА", "readings": 2, "expires_at": "31.01.2027"}',
+    )
+    assert bad_date.status == 400 and (await bad_date.json())["error"] == "expires_at"
+
+
+@pytest.mark.asyncio
+async def test_switching_a_code_off_stops_it_working(client):
+    made = await (
+        await client.post(
+            "/api/admin/promos",
+            headers=auth(user_id=OWNER),
+            data='{"code": "ПАУЗА", "readings": 2}',
+        )
+    ).json()
+
+    off = await client.post(
+        f"/api/admin/promos/{made['id']}/active",
+        headers=auth(user_id=OWNER),
+        data='{"active": false}',
+    )
+    assert off.status == 200 and (await off.json())["active"] is False
+
+    refused = await client.post(
+        "/api/promo", headers=auth(user_id=CLIENT), data='{"code": "ПАУЗА"}'
+    )
+    assert refused.status == 409 and (await refused.json())["error"] == "disabled"
+
+    # И обратно: код живёт дальше, его не удаляли
+    on = await client.post(
+        f"/api/admin/promos/{made['id']}/active",
+        headers=auth(user_id=OWNER),
+        data='{"active": true}',
+    )
+    assert (await on.json())["active"] is True
+
+    works = await client.post("/api/promo", headers=auth(user_id=CLIENT), data='{"code": "ПАУЗА"}')
+    assert works.status == 200
