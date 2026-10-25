@@ -29,11 +29,13 @@ from .tenants import active_tenants, ensure_default, settings_for
 
 logger = logging.getLogger(__name__)
 
+# Команды остались теми же, которые люди выучили, — но каждая открывает
+# свой экран приложения, а не ведёт в переписку.
 COMMANDS = [
-    BotCommand(command="start", description="Меню"),
+    BotCommand(command="start", description="Открыть приложение"),
     BotCommand(command="daily", description="Карта дня"),
     BotCommand(command="deck", description="Колода целиком"),
-    BotCommand(command="profile", description="Личный кабинет"),
+    BotCommand(command="profile", description="Кабинет"),
     BotCommand(command="chart", description="Натальная карта"),
     BotCommand(command="forecast", description="Астрологический прогноз"),
     BotCommand(command="natal", description="Подробный разбор карты"),

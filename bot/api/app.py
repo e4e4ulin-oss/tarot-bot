@@ -27,7 +27,7 @@ from .. import analytics, geo, texts
 from .. import profile as profile_parse
 from ..config import Settings
 from ..db import Repo
-from ..db.models import OrderStatus
+from ..db.models import OrderStatus, ReadingMode
 from ..handlers.author import notify_admin_new_order
 from ..handlers.payments import PAYLOAD_AUTO, PAYLOAD_NATAL
 from ..natal import forecast as natal_forecast
@@ -504,6 +504,82 @@ async def handle_forecast_text(request: web.Request) -> web.Response:
         return json_ok({"text": None, "quiet": False, "unavailable": True})
 
 
+async def handle_natal_get(request: web.Request) -> web.Response:
+    """Подробный разбор карты: уже написанный, или условия, на которых напишем."""
+    identity: Identity = request[IDENTITY]
+    settings: Settings = request[BRAND]
+    session_factory = request.app[SESSIONS]
+
+    async with session_factory() as session:
+        repo = Repo(session, tenant_id=identity.tenant_id)
+        card = await natal_card(repo, identity.user.id)
+        written = await repo.last_natal(identity.user.id)
+        paid = await repo.unspent_payment(identity.user.id, PAYLOAD_NATAL)
+
+    if card is None or not card.has_houses:
+        # Без времени и города дома не считаются, а разбор без домов — не разбор
+        return json_ok({"ready": False, "reason": "needs_time"})
+
+    if written is not None:
+        return json_ok({"ready": True, "text": written.interpretation, "written": True})
+
+    return json_ok(
+        {
+            "ready": True,
+            "written": False,
+            "paid": paid is not None or settings.is_admin(identity.user.id),
+            "price": settings.natal_reading_price,
+            "currency": settings.author_currency,
+        }
+    )
+
+
+async def handle_natal_write(request: web.Request) -> web.Response:
+    """Пишет разбор карты. Пишется один раз и надолго, поэтому и платный."""
+    identity: Identity = request[IDENTITY]
+    settings: Settings = request[BRAND]
+    session_factory = request.app[SESSIONS]
+    interpreter: Interpreter = request.app[INTERPRETER]
+
+    async with session_factory() as session:
+        repo = Repo(session, tenant_id=identity.tenant_id)
+        card = await natal_card(repo, identity.user.id)
+        if card is None or not card.has_houses:
+            return json_error("Нужны время и город рождения", 409, "needs_time")
+
+        written = await repo.last_natal(identity.user.id)
+        if written is not None:
+            return json_ok({"text": written.interpretation, "written": True})
+
+        paid = await repo.unspent_payment(identity.user.id, PAYLOAD_NATAL)
+        if paid is None and not settings.is_admin(identity.user.id):
+            return json_error("Разбор карты оплачивается отдельно", 402, "needs_payment")
+
+        user = await repo.get_user(identity.user.id)
+        try:
+            result = await interpreter.natal(
+                "\n".join(card.lines(aspects_limit=20, deep=True)), describe(user)
+            )
+        except (GrokError, TimeoutError):
+            logger.warning("Разбор карты не написан: модель не ответила")
+            return json_error("Модель не ответила, попробуйте позже", 503, "unavailable")
+
+        # Списываем только теперь: текст есть и сохранён
+        await repo.save_reading(
+            user_id=identity.user.id,
+            spread_key="natal",
+            question=None,
+            cards=[],
+            interpretation=result.text,
+            ai_used=result.ai_used,
+            mode=ReadingMode.NATAL,
+        )
+        if paid is not None:
+            await repo.spend_payment(paid)
+
+    return json_ok({"text": result.text, "written": True})
+
+
 async def handle_order_create(request: web.Request) -> web.Response:
     """Заявка живому тарологу. Одна открытая на человека — как и в боте."""
     identity: Identity = request[IDENTITY]
@@ -802,6 +878,8 @@ def create_app(
     app.router.add_get("/api/chart", handle_chart)
     app.router.add_get("/api/forecast", handle_forecast)
     app.router.add_post("/api/forecast", handle_forecast_text)
+    app.router.add_get("/api/natal", handle_natal_get)
+    app.router.add_post("/api/natal", handle_natal_write)
     app.router.add_post("/api/order", handle_order_create)
     app.router.add_delete("/api/order/{order_id}", handle_order_cancel)
     app.router.add_post("/api/invoice", handle_invoice)

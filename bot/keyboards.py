@@ -4,12 +4,24 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from .tarot import SPREAD_ORDER, SPREADS
 from .texts import TOPICS
 from .tiers import Tier
+
+
+def app_menu(url: str, label: str = "Открыть приложение") -> InlineKeyboardMarkup:
+    """Единственная кнопка бота: всё остальное живёт в приложении.
+
+    Telegram открывает мини-приложение только по https, поэтому адрес с
+    http сюда не годится — кнопку в таком случае не рисуем вовсе.
+    """
+    builder = InlineKeyboardBuilder()
+    builder.button(text=label, web_app=WebAppInfo(url=url))
+    builder.adjust(1)
+    return builder.as_markup()
 
 
 def main_menu(author_name: str) -> InlineKeyboardMarkup:
@@ -177,7 +189,10 @@ def places_menu(places) -> InlineKeyboardMarkup:
     """Тёзки: человек выбирает свой город сам, а не угадывает за него бот."""
     builder = InlineKeyboardBuilder()
     for place in places:
-        builder.button(text=f"{place.name} · {place.hint}", callback_data=f"place:{place.geonameid}")
+        builder.button(
+            text=f"{place.name} · {place.hint}",
+            callback_data=f"place:{place.geonameid}",
+        )
     builder.button(text="‹ Кабинет", callback_data="menu:profile")
     builder.adjust(1)
     return builder.as_markup()

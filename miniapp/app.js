@@ -222,6 +222,10 @@
             <h3>Прогноз</h3>
             <p>Что происходит с вашей картой сейчас</p>
           </div>
+          <div class="card tap" data-go="natal">
+            <h3>Подробный разбор карты</h3>
+            <p>Пишется один раз и надолго</p>
+          </div>
 
           <h3 style="font-family:var(--serif);font-weight:500;margin:18px 2px 10px">История</h3>
           <div class="rows">${history}</div>
@@ -367,6 +371,84 @@
         fail(body, err);
       }
     },
+  };
+
+  profileRender.natal = async function natalView() {
+    const body = $("#profile-body");
+    const head = `${backLink("В кабинет", "p-back")}
+      <h3 style="font-family:var(--serif);font-weight:500;font-size:22px;margin:0 0 10px">Подробный разбор карты</h3>`;
+    body.innerHTML = `${head}<p class="waiting">Смотрю, что уже есть…</p>`;
+    bindProfileBack();
+
+    try {
+      const data = await api("natal");
+      if (!data.ready) {
+        body.innerHTML = `${head}<div class="card"><h3>Нужны время и город рождения</h3>
+          <p>Без них не считаются дома, а разбор по домам — половина смысла. Заполните данные в кабинете.</p></div>`;
+        bindProfileBack();
+        return;
+      }
+      if (data.written) {
+        body.innerHTML = `${head}<div class="card"><div class="reading">${data.text}</div></div>`;
+        bindProfileBack();
+        return;
+      }
+
+      body.innerHTML = `${head}
+        <div class="card">
+          <h3>Разбор на весь ваш круг</h3>
+          <p>Солнце, Луна, асцендент, дома и аспекты — связно, одним текстом. Пишется один раз: карта рождения не меняется.</p>
+        </div>
+        <button class="btn" id="n-go">${data.paid ? "Написать разбор" : `Заказать за ${data.price} ${esc(data.currency)}`}</button>
+        <p class="note" id="n-msg"></p>`;
+      bindProfileBack();
+
+      $("#n-go").addEventListener("click", async () => {
+        const button = $("#n-go");
+        button.disabled = true;
+        tap("medium");
+        if (!data.paid) {
+          try {
+            const invoice = await api("invoice", {
+              method: "POST",
+              body: JSON.stringify({ kind: "natal" }),
+            });
+            if (!tg || !tg.openInvoice) {
+              $("#n-msg").textContent = "Оплата открывается только внутри Telegram.";
+              button.disabled = false;
+              return;
+            }
+            tg.openInvoice(invoice.link, (status) => {
+              if (status === "paid") {
+                profileView("natal");
+                return;
+              }
+              $("#n-msg").textContent =
+                status === "failed" ? "Оплата не прошла." : "Оплата отменена.";
+              button.disabled = false;
+            });
+          } catch (err) {
+            $("#n-msg").textContent = err.message;
+            button.disabled = false;
+          }
+          return;
+        }
+
+        $("#n-msg").textContent = "";
+        button.insertAdjacentHTML("afterend", '<p class="waiting" id="n-wait">Пишу разбор…</p>');
+        button.remove();
+        try {
+          const done = await api("natal", { method: "POST" });
+          body.innerHTML = `${head}<div class="card"><div class="reading">${done.text}</div></div>`;
+          bindProfileBack();
+        } catch (err) {
+          const wait = $("#n-wait");
+          if (wait) wait.outerHTML = `<p class="note">${esc(err.message)}</p>`;
+        }
+      });
+    } catch (err) {
+      fail(body, err);
+    }
   };
 
   let chosenPlace = null;
@@ -843,6 +925,16 @@
 
   // --- старт ----------------------------------------------------------------
 
+  function startScreen() {
+    // Бот передаёт экран якорем (#spread) или параметром запуска: человек
+    // набрал знакомую команду и должен попасть сразу куда хотел
+    const names = new Set(["daily", "spread", "author", "profile", "deck"]);
+    const hash = (location.hash || "").replace("#", "").trim();
+    if (names.has(hash)) return hash;
+    const param = tg && tg.initDataUnsafe ? tg.initDataUnsafe.start_param : "";
+    return names.has(param) ? param : "daily";
+  }
+
   loadConfig().catch(() => {});
-  show("daily");
+  show(startScreen());
 })();

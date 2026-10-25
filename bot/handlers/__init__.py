@@ -13,10 +13,13 @@ from . import (
     natal,
     payments,
     profile,
+    shortcuts,
 )
 
 # Роутеры объявлены на уровне модулей, поэтому собрать корневой роутер можно один раз за процесс.
 ROUTERS: tuple[Router, ...] = (
+    # Первым: команды ведут в приложение, а не в старые сценарии
+    shortcuts.router,
     common.router,
     admin.router,
     daily.router,

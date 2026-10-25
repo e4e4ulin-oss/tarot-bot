@@ -21,6 +21,8 @@ def _message(chat_id: int, user_id: int) -> Message:
 
 def test_router_order_keeps_fallback_last():
     assert [router.name for router in ROUTERS] == [
+        # Ярлыки первыми: команда открывает приложение, а не старый сценарий
+        "shortcuts",
         "common",
         "admin",
         "daily",
