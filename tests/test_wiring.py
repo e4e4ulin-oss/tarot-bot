@@ -224,14 +224,14 @@ def test_the_deck_opens_with_an_hourly_stamp():
     assert stamped(once, moment) == once
 
 
-def test_the_page_passes_the_stamp_on_to_its_files():
+def test_the_deck_passes_the_stamp_on_to_its_files():
     """Метка в адресе бессмысленна, если карточки грузятся прежними."""
     from pathlib import Path
 
-    # Колода теперь отдельная страница: index.html занят оболочкой приложения,
-    # а метка версии нужна именно там, где грузятся 78 картинок
-    page = Path(__file__).resolve().parents[1] / "miniapp" / "deck.html"
-    text = page.read_text(encoding="utf-8")
+    # Колода стала вкладкой приложения, но метка версии нужна там же, где
+    # грузятся 78 картинок, — в её модуле
+    module = Path(__file__).resolve().parents[1] / "miniapp" / "deck.js"
+    text = module.read_text(encoding="utf-8")
 
     assert "const V = STAMP" in text
     assert "cards/${card.id}.jpg${V}" in text
@@ -256,44 +256,24 @@ def test_the_web_script_and_the_bot_agree_on_the_port():
     assert int(fallback.group(1)) == Settings().web_port
 
 
-def test_the_deck_page_has_a_way_back():
-    """Колода — отдельная страница: вкладок на ней нет, и без выхода она ловушка.
+def test_the_deck_is_a_tab_not_a_page():
+    """Отдельная страница ломалась в Telegram, и чинить там было нечего.
 
-    Системная кнопка «назад» здесь раньше показывалась только поверх открытой
-    карты, а на доске пряталась — уйти из колоды было некуда.
+    Подпись приходит в адресе при открытии; уход на другой документ её
+    затирает, и приложение грузится без неё — вкладки видно, а за ними пусто.
+    Поэтому колода живёт внутри приложения, а старый адрес только
+    перенаправляет.
     """
     from pathlib import Path
 
-    page = Path(__file__).resolve().parents[1] / "miniapp" / "deck.html"
-    text = page.read_text(encoding="utf-8")
+    miniapp = Path(__file__).resolve().parents[1] / "miniapp"
+    index = (miniapp / "index.html").read_text(encoding="utf-8")
+    old_page = (miniapp / "deck.html").read_text(encoding="utf-8")
 
-    assert 'id="leave"' in text, "нет видимой ссылки выхода"
-    assert "function leaveToApp" in text
+    assert 'id="s-deck"' in index, "в приложении нет экрана колоды"
+    assert 'src="deck.js"' in index, "модуль колоды не подключён"
+    assert 'data-go="deck"' in index, "в панели нет вкладки колоды"
 
-    # Кнопка Telegram включается сразу, а не только при открытой карте
-    assert "tg.BackButton.show();" in text
-    assert "BackButton.hide" not in text
-
-
-def test_the_deck_carries_the_same_tabs_as_the_app():
-    """Колода — отдельная страница, и панель вкладок на ней своя.
-
-    Значит она может отстать: добавят вкладку в приложение, а здесь её не
-    будет, и человек из колоды в новый экран не попадёт. Списки держатся
-    вместе проверкой, а не памятью.
-    """
-    import re
-    from pathlib import Path
-
-    folder = Path(__file__).resolve().parents[1] / "miniapp"
-    names = {
-        page: re.findall(r'class="tab[^"]*" data-go="(\w+)"', (folder / page).read_text("utf-8"))
-        for page in ("index.html", "deck.html")
-    }
-
-    assert names["deck.html"], "на странице колоды нет панели вкладок"
-    assert names["deck.html"] == names["index.html"]
-
-    deck = (folder / "deck.html").read_text("utf-8")
-    # Текущая вкладка подсвечена, и это именно колода
-    assert 'class="tab on" data-go="deck"' in deck
+    # Старый адрес не рисует колоду заново, а отдаёт её приложению
+    assert "location.replace" in old_page
+    assert "#deck" in old_page

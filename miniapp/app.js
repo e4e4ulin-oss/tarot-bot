@@ -93,13 +93,9 @@
   const loaded = new Set();
 
   function show(name) {
-    if (name === "deck") {
-      // Колода — отдельная страница: она самодостаточна и уже умеет всё,
-      // что нужно, а держать её внутри оболочки значит грузить 78 картинок
-      // вместе с каждым запуском приложения
-      location.href = "deck.html";
-      return;
-    }
+    // Разворот карты закрываем до перехода: иначе он останется поверх
+    // нового экрана и перехватит первое же нажатие
+    if (window.DeckScreen && window.DeckScreen.isOpen()) window.DeckScreen.close();
     screens.forEach((s) => s.classList.toggle("on", s.dataset.tab === name));
     tabs.forEach((t) => t.classList.toggle("on", t.dataset.go === name));
     window.scrollTo({ top: 0 });
@@ -121,6 +117,19 @@
   let config = null;
 
   const render = {
+    async deck() {
+      // 78 карт грузятся при первом открытии вкладки, а не на старте.
+      // Модуля может не оказаться, если Telegram отдал страницу из кэша
+      // вперемешку со старыми файлами — тогда честно скажем об этом.
+      if (!window.DeckScreen) {
+        $("#s-deck").innerHTML =
+          '<div class="card"><h3>Колода не загрузилась</h3>' +
+          "<p>Закройте и откройте приложение заново.</p></div>";
+        return;
+      }
+      await window.DeckScreen.render($("#s-deck"));
+    },
+
     async daily() {
       const body = $("#daily-body");
       try {
@@ -1121,6 +1130,21 @@
   }
 
   // --- старт ----------------------------------------------------------------
+
+  // Системная кнопка «назад» принадлежит развороту карты, пока он открыт:
+  // внутри Telegram это первое, что нажимают, и закрывать приложение она
+  // в этот момент не должна.
+  if (window.DeckScreen && tg && tg.BackButton) {
+    window.DeckScreen.onViewerOpen = () => {
+      tg.BackButton.show();
+    };
+    window.DeckScreen.onViewerClose = () => {
+      tg.BackButton.hide();
+    };
+    tg.BackButton.onClick(() => {
+      if (window.DeckScreen.isOpen()) window.DeckScreen.close();
+    });
+  }
 
   function startScreen() {
     // Бот передаёт экран якорем (#spread) или параметром запуска: человек
