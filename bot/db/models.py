@@ -233,6 +233,28 @@ class Payment(Base):
     spent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
 
 
+class OrderMessage(Base):
+    """Реплика в переписке по заявке: ответ таролога или уточнение клиента.
+
+    Ответ раньше просто пересылался человеку в чат и нигде не оставался —
+    показать его в приложении было нечем, хотя платят именно за него. Теперь
+    переписка хранится: чат остаётся способом доставки, а не единственным
+    местом, где ответ существует.
+    """
+
+    __tablename__ = "order_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, default=1, index=True)
+    order_id: Mapped[int] = mapped_column(Integer, index=True)
+    # Кто сказал: author — таролог, client — человек с уточнением
+    author: Mapped[str] = mapped_column(String(16), default="author")
+    text: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, index=True
+    )
+
+
 class PromoCode(Base):
     """Промокод: несколько бесплатных раскладов тому, кто его ввёл.
 

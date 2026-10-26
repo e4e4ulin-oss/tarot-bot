@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 import pytest_asyncio
 from aiohttp.test_utils import TestClient, TestServer
@@ -380,14 +382,25 @@ async def test_invoice_says_when_payments_are_not_set_up(client):
 
 
 class FakeBot:
-    """Боту здесь нужно одно: назвать своё имя — из него собирается ссылка."""
+    """Бот нужен тут для двух вещей: назвать имя и донести сообщение.
+
+    Имя идёт в ссылку-приглашение, сообщения — тарологу: по ним и видно,
+    что уточнение из приложения доходит туда же, куда из переписки.
+    """
 
     class Me:
         username = "Taroautorasklad_bot"
         id = 1
 
+    def __init__(self) -> None:
+        self.sent: list[tuple[int, str]] = []
+
     async def me(self) -> Me:
         return self.Me()
+
+    async def send_message(self, chat_id, text, **kwargs):
+        self.sent.append((chat_id, text))
+        return None
 
 
 @pytest_asyncio.fixture
@@ -403,8 +416,10 @@ async def client_with_bot(tmp_path):
     async def brands(tenant_id: int) -> Settings:
         return settings
 
+    robot = FakeBot()
+
     async def bots(tenant_id: int) -> FakeBot:
-        return FakeBot()
+        return robot
 
     app = create_app(settings, factory, tokens, brands, bots=bots)
     test_client = TestClient(TestServer(app))
@@ -412,6 +427,7 @@ async def client_with_bot(tmp_path):
     # Фабрика сессий нужна и самому тесту: промокод заводит владелец, а не
     # приложение — в базу его кладём мимо API
     test_client.sessions = factory
+    test_client.robot = robot
     yield test_client
     await test_client.close()
     await engine.dispose()
@@ -629,3 +645,112 @@ async def test_someone_elses_reading_is_simply_not_found(client):
 
     assert stranger.status == missing.status == nonsense.status == 404
     assert (await stranger.json()) == (await missing.json())
+
+
+# --- Авторский разбор у клиента ------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_answer_is_readable_in_the_app(client_with_bot):
+    """За ответ платят — значит перечитывать его надо там, где платили."""
+    from bot.db import Repo
+    from bot.db.models import OrderStatus
+
+    async with client_with_bot.sessions() as session:
+        repo = Repo(session)
+        await repo.upsert_user(900, None, "Клиент")
+        order = await repo.create_order(
+            user_id=900, question="Что с работой?", topic=None, contact=None, tier="base"
+        )
+        await repo.add_order_message(order.id, "author", "Вот ваш разбор.")
+        await repo.set_order_status(order, OrderStatus.ANSWERED, admin_id=1)
+
+    listing = await (await client_with_bot.get("/api/orders", headers=auth(user_id=900))).json()
+    assert [item["id"] for item in listing["orders"]] == [order.id]
+    assert listing["orders"][0]["label"] == "Отвечена"
+
+    one = await (
+        await client_with_bot.get(f"/api/orders/{order.id}", headers=auth(user_id=900))
+    ).json()
+    assert one["question"] == "Что с работой?"
+    assert [(m["author"], m["text"]) for m in one["thread"]] == [("author", "Вот ваш разбор.")]
+    assert one["followups"]["left"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_a_followup_reaches_the_author_and_counts(client_with_bot):
+    from bot.db import Repo
+    from bot.db.models import OrderStatus
+
+    async with client_with_bot.sessions() as session:
+        repo = Repo(session)
+        await repo.upsert_user(901, None, "Клиент")
+        order = await repo.create_order(
+            user_id=901, question="Про отношения", topic=None, contact=None, tier="base"
+        )
+        await repo.add_order_message(order.id, "author", "Ответ.")
+        await repo.set_order_status(order, OrderStatus.ANSWERED, admin_id=1)
+
+    sent = await client_with_bot.post(
+        f"/api/orders/{order.id}/followup",
+        headers=auth(user_id=901),
+        data=json.dumps({"text": "А если подождать?"}),
+    )
+    assert sent.status == 200
+    assert (await sent.json())["followups"]["left"] == 0  # в «базовом» уточнение одно
+
+    # Таролог узнал об уточнении — тем же сообщением, что и из переписки
+    assert any("А если подождать?" in said for _, said in client_with_bot.robot.sent)
+
+    thread = await (
+        await client_with_bot.get(f"/api/orders/{order.id}", headers=auth(user_id=901))
+    ).json()
+    assert [m["author"] for m in thread["thread"]] == ["author", "client"]
+
+    # Второе уточнение по тому же уровню не проходит
+    again = await client_with_bot.post(
+        f"/api/orders/{order.id}/followup",
+        headers=auth(user_id=901),
+        data=json.dumps({"text": "ещё вопрос"}),
+    )
+    assert again.status == 409 and (await again.json())["error"] == "spent"
+
+
+@pytest.mark.asyncio
+async def test_a_followup_waits_for_the_answer(client_with_bot):
+    """Уточнять нечего, пока разбора нет."""
+    from bot.db import Repo
+
+    async with client_with_bot.sessions() as session:
+        repo = Repo(session)
+        await repo.upsert_user(902, None, "Клиент")
+        order = await repo.create_order(
+            user_id=902, question="Вопрос", topic=None, contact=None, tier="full"
+        )
+
+    early = await client_with_bot.post(
+        f"/api/orders/{order.id}/followup",
+        headers=auth(user_id=902),
+        data=json.dumps({"text": "а когда?"}),
+    )
+    assert early.status == 409 and (await early.json())["error"] == "not_answered"
+
+
+@pytest.mark.asyncio
+async def test_someone_elses_order_is_not_found(client_with_bot):
+    from bot.db import Repo
+
+    async with client_with_bot.sessions() as session:
+        repo = Repo(session)
+        await repo.upsert_user(903, None, "Хозяин")
+        order = await repo.create_order(
+            user_id=903, question="Личное", topic=None, contact=None, tier="short"
+        )
+
+    peek = await client_with_bot.get(f"/api/orders/{order.id}", headers=auth(user_id=904))
+    poke = await client_with_bot.post(
+        f"/api/orders/{order.id}/followup",
+        headers=auth(user_id=904),
+        data=json.dumps({"text": "чужое"}),
+    )
+    assert peek.status == 404 and poke.status == 404

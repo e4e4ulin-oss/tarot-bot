@@ -138,6 +138,12 @@ async def deliver_answer(
         return
 
     await state.clear()
+    # Текст ответа остаётся у нас: в чат он уходит копией, а в приложении
+    # человек должен его перечитывать, не листая переписку. Голосовой или
+    # картинкой ответ текста не имеет — тогда остаётся пустая реплика, и
+    # приложение честно говорит, что ответ пришёл в чат
+    body = message.html_text if (message.text or message.caption) else ""
+    await repo.add_order_message(order.id, "author", body)
     await repo.set_order_status(order, OrderStatus.ANSWERED, admin_id=message.from_user.id)
     await repo.log_event(order.user_id, analytics.ORDER_ANSWERED, order.tier)
     await message.answer(texts.ADMIN_ANSWER_SENT.format(order_id=order.id))

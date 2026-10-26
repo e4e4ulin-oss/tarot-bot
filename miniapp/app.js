@@ -1050,6 +1050,7 @@
       const me = await api("me");
       if (me.open_order) {
         authorSent(me.open_order, data);
+        await appendOrders(body, me.open_order.id);
         return;
       }
 
@@ -1078,6 +1079,118 @@
           authorForm(data.tiers.find((t) => t.key === node.dataset.tier), data);
         })
       );
+
+      await appendOrders(body);
+    } catch (err) {
+      fail(body, err);
+    }
+  }
+
+  /* Прошлые заявки: ответ таролога пишется один раз и остаётся — читать его
+     человек приходит сюда, а не листает переписку. */
+  async function appendOrders(body, skipId) {
+    let orders = [];
+    try {
+      orders = (await api("orders")).orders || [];
+    } catch (err) {
+      return; // заявки — дополнение к экрану, а не сам экран
+    }
+    const shown = orders.filter((order) => order.id !== skipId);
+    if (!shown.length) return;
+
+    body.insertAdjacentHTML(
+      "beforeend",
+      `<h3 style="font-family:var(--serif);font-weight:500;margin:20px 2px 10px">Ваши заявки</h3>
+       <div class="rows">
+         ${shown
+           .map(
+             (order) => `
+           <button class="row tap" data-order="${order.id}">
+             <span>№${order.id} · ${esc(order.tier_title || "")}</span>
+             <b>${esc(order.label || "")} ›</b>
+           </button>`
+           )
+           .join("")}
+       </div>`
+    );
+
+    body.querySelectorAll("[data-order]").forEach((node) =>
+      node.addEventListener("click", () => {
+        tap();
+        authorThread(node.dataset.order);
+      })
+    );
+  }
+
+  /* Заявка целиком: вопрос, ответ и уточнения — по порядку, как разговор. */
+  async function authorThread(id) {
+    const body = $("#author-body");
+    const head = `${backLink("К разборам", "a-back")}`;
+    body.innerHTML = `${head}<p class="waiting">Открываю заявку…</p>`;
+    $("#a-back").addEventListener("click", () => {
+      tap();
+      authorView();
+    });
+
+    try {
+      const order = await api(`orders/${encodeURIComponent(id)}`);
+      const said = (item) =>
+        item.text
+          ? `<div class="card${item.author === "client" ? " mine" : ""}">
+               <p class="note">${item.author === "client" ? "Ваше уточнение" : "Ответ"} · ${esc(dateLabel(item.created_at))}</p>
+               <div class="reading">${item.text}</div>
+             </div>`
+          : `<div class="card"><p class="note">Ответ пришёл в чат — он не текстом.</p></div>`;
+
+      const left = order.followups.left;
+      body.innerHTML = `${head}
+        <h3 style="font-family:var(--serif);font-weight:500;font-size:22px;margin:0 0 4px">Заявка №${order.id}</h3>
+        <p class="lead">${esc(order.tier_title || "")} · ${esc(order.label || "")} · ${esc(dateLabel(order.created_at))}</p>
+        <div class="card mine">
+          <p class="note">Ваш вопрос</p>
+          <div class="reading">${esc(order.question || "")}</div>
+        </div>
+        ${order.thread.map(said).join("")}
+        ${
+          order.status === "answered"
+            ? left > 0
+              ? `<label class="note">Уточняющий вопрос — осталось ${left}</label>
+                 <textarea class="field" id="a-more" maxlength="500"
+                   placeholder="Спросите о том, что осталось непонятным"></textarea>
+                 <button class="btn" id="a-ask">Отправить уточнение</button>
+                 <p class="note" id="a-msg"></p>`
+              : '<p class="note">Уточнения по этой заявке кончились.</p>'
+            : '<p class="note">Ответ придёт сюда и дублем в чат.</p>'
+        }`;
+      $("#a-back").addEventListener("click", () => {
+        tap();
+        authorView();
+      });
+
+      const ask = $("#a-ask");
+      if (!ask) return;
+      ask.addEventListener("click", async () => {
+        const field = $("#a-more");
+        const note = $("#a-msg");
+        const question = (field.value || "").trim();
+        if (!question) {
+          note.textContent = "Напишите вопрос.";
+          return;
+        }
+        ask.disabled = true;
+        note.textContent = "";
+        try {
+          await api(`orders/${order.id}/followup`, {
+            method: "POST",
+            body: JSON.stringify({ text: question }),
+          });
+          tap("medium");
+          authorThread(order.id);
+        } catch (err) {
+          note.textContent = err.message;
+          ask.disabled = false;
+        }
+      });
     } catch (err) {
       fail(body, err);
     }
@@ -1140,7 +1253,7 @@
     body.innerHTML = `
       <div class="card">
         <h3>Заявка №${order.id} у автора</h3>
-        <p>${esc(data.author)} ответит${deadline ? ` в течение ${deadline} ч` : ""}. Ответ придёт сюда же, в чат с ботом.</p>
+        <p>${esc(data.author)} ответит${deadline ? ` в течение ${deadline} ч` : ""}. Ответ придёт сюда и дублем в чат.</p>
         ${order.created_at ? `<p class="note">Отправлена ${esc(dateLabel(order.created_at))}</p>` : ""}
       </div>
       <button class="btn ghost" id="a-cancel">Отменить заявку</button>

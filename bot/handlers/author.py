@@ -278,6 +278,32 @@ async def notify_admin_new_order(
         await repo.set_admin_message(order, sent.message_id)
 
 
+async def notify_admin_followup(
+    bot: Bot,
+    settings: Settings,
+    order: Order,
+    text: str,
+    full_name: str | None,
+    username: str | None,
+) -> None:
+    """Уточнение уходит тому, кто ведёт заявки, откуда бы его ни задали.
+
+    Из переписки и из приложения — одно и то же сообщение: у таролога не
+    должно быть двух разных ящиков.
+    """
+    user_line = texts.esc(full_name or "без имени")
+    if username:
+        user_line += f" (@{texts.esc(username)})"
+    await notify_admins(
+        bot,
+        settings,
+        texts.ADMIN_FOLLOWUP.format(
+            order_id=order.id, user=user_line, text=texts.esc(text)
+        ),
+        reply_markup=admin_order_menu(order.id, taken=True),
+    )
+
+
 @router.callback_query(F.data.startswith("order:cancel:"))
 async def cb_cancel_order(call: CallbackQuery, repo: Repo, settings: Settings, bot: Bot) -> None:
     order_id = int(call.data.rsplit(":", 1)[1])
@@ -354,18 +380,15 @@ async def on_followup(
         await _say_no_followups_left(message, settings, order)
         return
 
-    user_line = texts.esc(message.from_user.full_name)
-    if message.from_user.username:
-        user_line += f" (@{texts.esc(message.from_user.username)})"
-    await notify_admins(
+    await notify_admin_followup(
         bot,
         settings,
-        texts.ADMIN_FOLLOWUP.format(
-            order_id=order.id, user=user_line, text=texts.esc(message.text or "")
-        ),
-        reply_markup=admin_order_menu(order.id, taken=True),
+        order,
+        message.text or "",
+        message.from_user.full_name,
+        message.from_user.username,
     )
-
+    await repo.add_order_message(order.id, "client", message.text or "")
     await repo.count_followup(order)
 
     left = _followups_left(settings, order)

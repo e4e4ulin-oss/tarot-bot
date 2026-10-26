@@ -30,8 +30,8 @@ from ..access import check as check_access
 from ..access import owns
 from ..config import Settings
 from ..db import Repo
-from ..db.models import OrderStatus, ReadingMode
-from ..handlers.author import notify_admin_new_order
+from ..db.models import ORDER_STATUS_LABELS, Order, OrderStatus, ReadingMode
+from ..handlers.author import notify_admin_followup, notify_admin_new_order
 from ..handlers.payments import PAYLOAD_AUTO, PAYLOAD_NATAL
 from ..natal import forecast as natal_forecast
 from ..natal import full as natal_full
@@ -43,7 +43,7 @@ from ..services.daily import card_of_the_day
 from ..services.grok import GrokClient, GrokError
 from ..services.interpreter import Interpreter
 from ..tarot import SPREAD_ORDER, SPREADS, DrawnCard, deserialize, get_spread
-from ..tiers import find_tier
+from ..tiers import find_tier, followups_allowed, tier_label
 from ..tiers import tiers as author_tiers
 from .auth import AuthError, Identity, WebAppUser, init_data_from_header, verify
 
@@ -689,6 +689,127 @@ async def handle_order_cancel(request: web.Request) -> web.Response:
     return json_ok({"cancelled": True})
 
 
+# --- Авторский разбор ----------------------------------------------------
+# Заявку человек оформляет здесь, ответ таролог пишет в переписке, а читается
+# он снова здесь: переписка — способ доставки, а не место, где ответ живёт.
+
+
+def order_json(order: Order, settings: Settings) -> dict[str, Any]:
+    allowed = followups_allowed(settings, order.tier)
+    label = ORDER_STATUS_LABELS.get(order.status, "")
+    return {
+        "id": order.id,
+        "tier": order.tier,
+        "tier_title": tier_label(settings, order.tier),
+        "status": order.status.value if hasattr(order.status, "value") else str(order.status),
+        # Подпись одна на все окна: придумывать приложению свои слова незачем
+        "label": label.split(" ", 1)[-1] if label else "",
+        "question": order.question,
+        "created_at": order.created_at.isoformat() if order.created_at else None,
+        "answered_at": order.answered_at.isoformat() if order.answered_at else None,
+        "followups": {
+            "allowed": allowed,
+            "used": order.followups_used or 0,
+            "left": max(0, allowed - (order.followups_used or 0)),
+        },
+    }
+
+
+async def handle_orders_list(request: web.Request) -> web.Response:
+    identity: Identity = request[IDENTITY]
+    settings: Settings = request[BRAND]
+
+    async with request.app[SESSIONS]() as session:
+        orders = await Repo(session, tenant_id=identity.tenant_id).orders_of(identity.user.id)
+    return json_ok({"orders": [order_json(order, settings) for order in orders]})
+
+
+async def handle_order_one(request: web.Request) -> web.Response:
+    """Заявка целиком: вопрос, ответ таролога и уточнения по порядку."""
+    identity: Identity = request[IDENTITY]
+    settings: Settings = request[BRAND]
+
+    try:
+        order_id = int(request.match_info["order_id"])
+    except (TypeError, ValueError):
+        return json_error("Заявка не найдена", 404, "unknown")
+
+    async with request.app[SESSIONS]() as session:
+        repo = Repo(session, tenant_id=identity.tenant_id)
+        order = await repo.get_order(order_id)
+        # Чужая заявка и несуществующая отвечают одинаково
+        if order is None or order.user_id != identity.user.id:
+            return json_error("Заявка не найдена", 404, "unknown")
+        thread = await repo.order_messages(order.id)
+
+    return json_ok(
+        {
+            **order_json(order, settings),
+            "thread": [
+                {
+                    "author": item.author,
+                    "text": item.text,
+                    "created_at": item.created_at.isoformat() if item.created_at else None,
+                }
+                for item in thread
+            ],
+        }
+    )
+
+
+async def handle_order_followup(request: web.Request) -> web.Response:
+    """Уточняющий вопрос по отвеченной заявке."""
+    identity: Identity = request[IDENTITY]
+    settings: Settings = request[BRAND]
+    bots: BotProvider = request.app[BOTS]
+
+    try:
+        order_id = int(request.match_info["order_id"])
+    except (TypeError, ValueError):
+        return json_error("Заявка не найдена", 404, "unknown")
+
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    question = (payload.get("text") or "").strip()
+    if not question:
+        return json_error("Вопрос пустой", 400, "empty")
+    if len(question) > settings.max_question_length:
+        return json_error(
+            f"Вопрос длиннее {settings.max_question_length} символов", 400, "too_long"
+        )
+
+    async with request.app[SESSIONS]() as session:
+        repo = Repo(session, tenant_id=identity.tenant_id)
+        order = await repo.get_order(order_id)
+        if order is None or order.user_id != identity.user.id:
+            return json_error("Заявка не найдена", 404, "unknown")
+        if order.status != OrderStatus.ANSWERED:
+            # Уточнять нечего, пока нет ответа
+            return json_error("Ответ по этой заявке ещё не пришёл", 409, "not_answered")
+        allowed = followups_allowed(settings, order.tier)
+        if (order.followups_used or 0) >= allowed:
+            return json_error("Уточнения по этой заявке кончились", 409, "spent")
+
+        bot = await bots(identity.tenant_id)
+        if bot is None:
+            return json_error("Бот недоступен", 503, "no_bot")
+        await notify_admin_followup(
+            bot,
+            settings,
+            order,
+            question,
+            identity.user.first_name,
+            identity.user.username,
+        )
+        await repo.add_order_message(order.id, "client", question)
+        await repo.count_followup(order)
+        await session.refresh(order)
+        return json_ok(order_json(order, settings))
+
+
 async def handle_reading_one(request: web.Request) -> web.Response:
     """Сохранённый расклад целиком: карты и тот самый разбор.
 
@@ -1127,6 +1248,9 @@ def create_app(
     app.router.add_post("/api/order", handle_order_create)
     app.router.add_delete("/api/order/{order_id}", handle_order_cancel)
     app.router.add_get("/api/readings/{reading_id}", handle_reading_one)
+    app.router.add_get("/api/orders", handle_orders_list)
+    app.router.add_get("/api/orders/{order_id}", handle_order_one)
+    app.router.add_post("/api/orders/{order_id}/followup", handle_order_followup)
     app.router.add_get("/api/invite", handle_invite)
     app.router.add_get("/api/admin/promos", handle_promos_list)
     app.router.add_post("/api/admin/promos", handle_promo_create)

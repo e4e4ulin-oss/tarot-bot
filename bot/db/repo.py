@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import (
     CardImage,
+    OrderMessage,
     DailyCard,
     Event,
     Order,
@@ -384,6 +385,36 @@ class Repo:
             order.answered_at = utcnow()
         await self.session.commit()
         return order
+
+    async def add_order_message(self, order_id: int, author: str, text: str) -> OrderMessage:
+        """Записывает реплику. Пустой текст тоже реплика: ответ мог быть голосом."""
+        message = OrderMessage(
+            tenant_id=self.tenant_id, order_id=order_id, author=author, text=text
+        )
+        self.session.add(message)
+        await self.session.commit()
+        return message
+
+    async def order_messages(self, order_id: int) -> list[OrderMessage]:
+        result = await self.session.execute(
+            select(OrderMessage)
+            .where(
+                OrderMessage.tenant_id == self.tenant_id,
+                OrderMessage.order_id == order_id,
+            )
+            .order_by(OrderMessage.created_at, OrderMessage.id)
+        )
+        return list(result.scalars())
+
+    async def orders_of(self, user_id: int, limit: int = 10) -> list[Order]:
+        """Заявки человека, свежие сверху."""
+        result = await self.session.execute(
+            select(Order)
+            .where(Order.tenant_id == self.tenant_id, Order.user_id == user_id)
+            .order_by(Order.created_at.desc())
+            .limit(limit)
+        )
+        return list(result.scalars())
 
     async def count_followup(self, order: Order) -> Order:
         order.followups_used = (order.followups_used or 0) + 1

@@ -300,3 +300,32 @@ def test_the_app_asks_for_the_whole_screen():
     assert "html.fullscreen" in styles
     assert "--tg-content-safe-area-inset-top" in styles
     assert "--tg-safe-area-inset-bottom" in styles
+
+
+def test_the_app_can_read_the_author_answer():
+    """Самый дорогой товар не должен жить наполовину в переписке.
+
+    Ответ хранится, значит приложению есть что показать; эти три нити —
+    список заявок, сама заявка и уточнение — и делают разбор читаемым там,
+    где за него заплатили.
+    """
+    from pathlib import Path
+
+    app = (Path(__file__).resolve().parents[1] / "miniapp" / "app.js").read_text("utf-8")
+
+    assert 'api("orders")' in app
+    assert "authorThread" in app
+    assert "/followup" in app
+
+
+def test_the_answer_is_written_down_not_only_forwarded():
+    """Копия в чате исчезает из виду; запись остаётся."""
+    from pathlib import Path
+
+    admin = (Path(__file__).resolve().parents[1] / "bot" / "handlers" / "admin.py").read_text(
+        "utf-8"
+    )
+
+    assert 'add_order_message(order.id, "author"' in admin
+    # Записываем до смены статуса: отвеченная заявка без ответа — ложь
+    assert admin.index("add_order_message") < admin.index("OrderStatus.ANSWERED, admin_id")
