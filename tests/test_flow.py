@@ -402,7 +402,7 @@ async def test_reading_sends_card_images_and_caches_file_ids(env):
     assert cached.get(key), "file_id карты не сохранился"
 
     # та же карта во второй раз уходит уже по file_id, без обращения к Викискладу
-    from bot.handlers.auto import send_card_images
+    from bot.services.cards import send_card_images
     from bot.tarot import deserialize
 
     drawn = deserialize(readings[0].cards)
@@ -431,7 +431,7 @@ async def test_a_big_spread_arrives_as_one_sheet(env, monkeypatch):
 
     from PIL import Image
 
-    from bot.handlers.auto import send_card_images
+    from bot.services.cards import send_card_images
     from bot.tarot import draw_spread, get_spread
 
     def one_card() -> bytes:
@@ -945,14 +945,14 @@ async def test_reversed_card_is_sent_upside_down_and_cached_apart(env, monkeypat
     """Подпись говорит «перевёрнутая» — картинка должна говорить то же самое."""
     from aiogram.types import BufferedInputFile
 
-    from bot.handlers.auto import send_card_images
+    from bot.services.cards import send_card_images
     from bot.tarot import DrawnCard, get_card
     from bot.tarot.images import cache_key
 
     async def turned(card):
         return "перевёрнутая картинка".encode()
 
-    monkeypatch.setattr("bot.handlers.auto.reversed_image_bytes", turned)
+    monkeypatch.setattr("bot.services.cards.reversed_image_bytes", turned)
 
     dp, bot, session, factory = env
     card = get_card("major_18")
@@ -978,14 +978,14 @@ async def test_reversed_card_is_sent_upside_down_and_cached_apart(env, monkeypat
 @pytest.mark.asyncio(loop_scope="module")
 async def test_unrotatable_card_falls_back_without_poisoning_the_cache(env, monkeypatch):
     """Если повернуть не вышло, прямую картинку нельзя запомнить как перевёрнутую."""
-    from bot.handlers.auto import send_card_images
+    from bot.services.cards import send_card_images
     from bot.tarot import DrawnCard, get_card
     from bot.tarot.images import cache_key
 
     async def nothing(card):
         return None
 
-    monkeypatch.setattr("bot.handlers.auto.reversed_image_bytes", nothing)
+    monkeypatch.setattr("bot.services.cards.reversed_image_bytes", nothing)
 
     dp, bot, session, factory = env
     card = get_card("major_17")

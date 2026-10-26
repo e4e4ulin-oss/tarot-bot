@@ -20,6 +20,7 @@ from ..db import Repo
 from ..keyboards import daily_card_menu
 from ..schedule import now
 from ..tarot import SPREADS, DrawnCard, draw_spread, get_card
+from .cards import send_card_images
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +102,12 @@ class DailyCards:
     async def _send_one(self, repo: Repo, user_id: int, day: date) -> bool:
         drawn = await card_of_the_day(repo, self.settings, user_id, day)
         try:
+            # Сначала сама карта, потом слова о ней: утром человек смотрит,
+            # а читает уже потом. Раньше карта дня приходила без карты
+            try:
+                await send_card_images(self.bot, user_id, [drawn], repo, self.settings)
+            except Exception as exc:  # noqa: BLE001 - картинка не отменяет рассылку
+                logger.warning("Карта дня: картинку для %s не отправить: %s", user_id, exc)
             await self.bot.send_message(
                 user_id, card_message(drawn), reply_markup=daily_card_menu(subscribed=True)
             )

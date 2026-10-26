@@ -5,14 +5,11 @@ from __future__ import annotations
 import logging
 import secrets
 
-from aiogram import Bot, F, Router
-from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
+from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
-    BufferedInputFile,
     CallbackQuery,
-    FSInputFile,
-    InputMediaPhoto,
     Message,
 )
 from aiogram.utils.chat_action import ChatActionSender
@@ -29,17 +26,15 @@ from ..keyboards import (
     subscribe_menu,
 )
 from ..services import reading
+from ..services.cards import send_card_images
 from ..services.interpreter import DISCLAIMER, Interpreter
 from ..states import AutoFlow
 from ..tarot import (
     SPREADS,
-    DrawnCard,
     Spread,
     format_cards,
     get_spread,
 )
-from ..tarot.images import cache_key, commons_url, local_path, reversed_image_bytes
-from ..tarot.layout import sheet
 from ..utils import split_text
 from .invite import tell_the_inviter
 
@@ -179,87 +174,6 @@ async def cb_number_from_the_deck(
             interpreter,
             number=secrets.randbelow(NUMBER_LIMIT) + 1,
         )
-
-
-async def send_card_images(
-    bot: Bot, chat_id: int, drawn: list[DrawnCard], repo: Repo, settings: Settings
-) -> None:
-    """Показывает сами карты. Своя картинка приоритетнее скана, ссылка — на крайний случай.
-
-    Присланный Telegram file_id сохраняется, поэтому к источнику бот идёт один раз на карту.
-    Картинки — украшение: любая неудача здесь не должна мешать раскладу.
-    """
-    if not settings.send_card_images:
-        return
-
-    # Большой расклад уходит одним листом: пять отдельных фотографий — это уже
-    # лента, в которой не видно ни порядка, ни расклада целиком
-    if len(drawn) > settings.image_cards_limit:
-        await send_spread_sheet(bot, chat_id, drawn)
-        return
-
-    cached = await repo.card_file_ids(
-        [cache_key(item.card, item.reversed) for item in drawn]
-    )
-    prepared = [await _card_photo(item, cached) for item in drawn]
-
-    try:
-        sent = await bot.send_media_group(chat_id, [photo for _, photo in prepared])
-    except TelegramAPIError as exc:
-        logger.warning("Картинки карт отправить не удалось: %s", exc)
-        return
-
-    for (key, _), sent_message in zip(prepared, sent, strict=False):
-        # key is None, когда перевернуть не удалось: кэшировать прямую картинку
-        # под перевёрнутым ключом нельзя, иначе она застрянет там навсегда.
-        if key is not None and sent_message.photo:
-            await repo.save_card_file_id(key, sent_message.photo[-1].file_id)
-
-
-async def send_spread_sheet(bot: Bot, chat_id: int, drawn: list[DrawnCard]) -> None:
-    """Расклад одной картинкой: карты по порядку, с номерами.
-
-    Лист собирается каждый раз заново — сочетание карт своё у каждого
-    расклада, и кэшировать его незачем.
-    """
-    picture = await sheet(drawn)
-    if picture is None:
-        logger.warning("Лист расклада не собрался: картинок карт не досталось")
-        return
-
-    try:
-        await bot.send_photo(
-            chat_id,
-            BufferedInputFile(picture, filename="spread.jpg"),
-            caption=texts.SPREAD_SHEET,
-        )
-    except TelegramAPIError as exc:
-        logger.warning("Лист расклада отправить не удалось: %s", exc)
-
-
-async def _card_photo(
-    item: DrawnCard, cached: dict[str, str]
-) -> tuple[str | None, InputMediaPhoto]:
-    """Картинка карты и ключ кэша для неё (None — не кэшировать)."""
-    key = cache_key(item.card, item.reversed)
-    if (file_id := cached.get(key)) is not None:
-        return key, InputMediaPhoto(media=file_id, caption=item.title)
-
-    if item.reversed:
-        turned = await reversed_image_bytes(item.card)
-        if turned is not None:
-            return key, InputMediaPhoto(
-                media=BufferedInputFile(turned, filename=f"{item.card.id}_rev.jpg"),
-                caption=item.title,
-            )
-        # Не вышло повернуть — прямая картинка лучше, чем пустота, но она не наша
-        key = None
-
-    if (path := local_path(item.card)) is not None:
-        source: str | FSInputFile = FSInputFile(path)
-    else:
-        source = commons_url(item.card)
-    return key, InputMediaPhoto(media=source, caption=item.title)
 
 
 async def refuse(message: Message, settings: Settings, decision: reading.Refused) -> None:

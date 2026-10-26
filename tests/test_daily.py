@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
+from types import SimpleNamespace
+
 import pytest
 import pytest_asyncio
 from aiogram.exceptions import TelegramForbiddenError
@@ -26,10 +28,24 @@ def settings(**overrides) -> Settings:
 class FakeBot:
     """Запоминает отправленное; умеет изображать блокировку и поломку."""
 
-    def __init__(self, fail_for: set[int] | None = None, blocked: set[int] | None = None) -> None:
+    def __init__(
+        self,
+        fail_for: set[int] | None = None,
+        blocked: set[int] | None = None,
+        no_photos: bool = False,
+    ) -> None:
         self.sent: list[tuple[int, str]] = []
+        self.photos: list[int] = []
         self.fail_for = fail_for or set()
         self.blocked = blocked or set()
+        self.no_photos = no_photos
+
+    async def send_media_group(self, chat_id: int, media, **kwargs):
+        if self.no_photos:
+            raise RuntimeError("картинка не ушла")
+        self.photos.append(chat_id)
+        # Без photo в ответе кэш file_id не трогается — здесь это и не нужно
+        return [SimpleNamespace(photo=None) for _ in media]
 
     async def send_message(self, chat_id: int, text: str, **kwargs) -> None:
         if chat_id in self.blocked:
@@ -208,3 +224,27 @@ async def test_message_says_what_the_card_means(factory):
 
     assert "Карта дня" in text
     assert drawn.meaning[:20] in text
+
+
+@pytest.mark.asyncio
+async def test_the_morning_card_arrives_as_a_picture(factory):
+    """Карта дня без карты — это не карта дня, а сообщение о ней."""
+    await subscribe(factory, 1)
+    bot = FakeBot()
+
+    assert await DailyCards(bot, settings(), factory).send_due(TODAY) == 1
+
+    assert bot.photos == [1]
+    assert bot.recipients == [1]  # и текст тоже пришёл
+
+
+@pytest.mark.asyncio
+async def test_a_missing_picture_does_not_cancel_the_card(factory):
+    """Картинка — украшение: если она не ушла, слова всё равно должны дойти."""
+    await subscribe(factory, 1)
+    bot = FakeBot(no_photos=True)
+
+    assert await DailyCards(bot, settings(), factory).send_due(TODAY) == 1
+
+    assert bot.photos == []
+    assert bot.recipients == [1]

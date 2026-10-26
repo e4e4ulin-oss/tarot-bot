@@ -152,7 +152,7 @@ async def test_the_reward_is_paid_by_one_place_only(repo):
     from bot.services import reading
 
     assert "referrals.reward" in inspect.getsource(reading.finish)
-    for other in ("bot/handlers/auto.py", "bot/api/app.py"):
+    for other in ("bot/handlers/auto.py", "bot/api/app.py", "bot/services/cards.py"):
         from pathlib import Path
 
         text = Path(__file__).resolve().parents[1].joinpath(other).read_text(encoding="utf-8")
