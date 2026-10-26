@@ -16,7 +16,7 @@ import secrets
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from aiogram import Bot
@@ -38,6 +38,7 @@ from ..natal import full as natal_full
 from ..natal import timeline as natal_timeline
 from ..profile import describe, stored_place
 from ..schedule import now
+from ..services import orders as order_rules
 from ..services import reading as reading_rules
 from ..services.daily import card_of_the_day
 from ..services.grok import GrokClient, GrokError
@@ -932,6 +933,207 @@ def deny_stranger(request: web.Request) -> web.Response | None:
     return json_error("Это хозяйский экран", 403, "forbidden")
 
 
+async def handle_admin_orders(request: web.Request) -> web.Response:
+    """Стол заявок: что пришло, что в работе, что отвечено."""
+    if (refusal := deny_stranger(request)) is not None:
+        return refusal
+
+    identity: Identity = request[IDENTITY]
+    settings: Settings = request[BRAND]
+
+    async with request.app[SESSIONS]() as session:
+        repo = Repo(session, tenant_id=identity.tenant_id)
+        found = await repo.open_orders(limit=50)
+        # Свежие отвеченные тоже нужны: по ним смотрят, что написали вчера
+        recent = [
+            order
+            for order in await repo.last_orders(limit=20)
+            if order.status not in (OrderStatus.NEW, OrderStatus.IN_PROGRESS)
+        ]
+        rows = []
+        for order in [*found, *recent]:
+            user = await repo.get_user(order.user_id)
+            rows.append(
+                {
+                    **order_json(order, settings),
+                    "client": {
+                        "id": order.user_id,
+                        "name": user.first_name if user else None,
+                        "username": user.username if user else None,
+                        "contact": order.contact,
+                    },
+                }
+            )
+
+    return json_ok({"orders": rows})
+
+
+async def handle_admin_order_one(request: web.Request) -> web.Response:
+    """Заявка глазами таролога: вопрос, переписка и кто спрашивает."""
+    if (refusal := deny_stranger(request)) is not None:
+        return refusal
+
+    identity: Identity = request[IDENTITY]
+    settings: Settings = request[BRAND]
+
+    try:
+        order_id = int(request.match_info["order_id"])
+    except (TypeError, ValueError):
+        return json_error("Заявка не найдена", 404, "unknown")
+
+    async with request.app[SESSIONS]() as session:
+        repo = Repo(session, tenant_id=identity.tenant_id)
+        order = await repo.get_order(order_id)
+        if order is None:
+            return json_error("Заявка не найдена", 404, "unknown")
+        thread = await repo.order_messages(order.id)
+        user = await repo.get_user(order.user_id)
+
+    return json_ok(
+        {
+            **order_json(order, settings),
+            "client": {
+                "id": order.user_id,
+                "name": user.first_name if user else None,
+                "username": user.username if user else None,
+                "contact": order.contact,
+            },
+            "thread": [
+                {
+                    "author": item.author,
+                    "text": item.text,
+                    "created_at": item.created_at.isoformat() if item.created_at else None,
+                }
+                for item in thread
+            ],
+        }
+    )
+
+
+async def handle_admin_order_take(request: web.Request) -> web.Response:
+    """Взять заявку в работу: человек видит, что ею занялись."""
+    if (refusal := deny_stranger(request)) is not None:
+        return refusal
+
+    identity: Identity = request[IDENTITY]
+    settings: Settings = request[BRAND]
+
+    async with request.app[SESSIONS]() as session:
+        repo = Repo(session, tenant_id=identity.tenant_id)
+        order = await repo.get_order(int(request.match_info["order_id"]))
+        if order is None:
+            return json_error("Заявка не найдена", 404, "unknown")
+        await repo.set_order_status(order, OrderStatus.IN_PROGRESS, admin_id=identity.user.id)
+        return json_ok(order_json(order, settings))
+
+
+async def handle_admin_order_answer(request: web.Request) -> web.Response:
+    """Ответ из приложения: уходит человеку в чат и остаётся в заявке."""
+    if (refusal := deny_stranger(request)) is not None:
+        return refusal
+
+    identity: Identity = request[IDENTITY]
+    settings: Settings = request[BRAND]
+    bots: BotProvider = request.app[BOTS]
+
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    answer = (payload.get("text") or "").strip()
+    if not answer:
+        return json_error("Ответ пустой", 400, "empty")
+
+    async with request.app[SESSIONS]() as session:
+        repo = Repo(session, tenant_id=identity.tenant_id)
+        order = await repo.get_order(int(request.match_info["order_id"]))
+        if order is None:
+            return json_error("Заявка не найдена", 404, "unknown")
+
+        bot = await bots(identity.tenant_id)
+        if bot is None:
+            return json_error("Бот недоступен", 503, "no_bot")
+
+        # Сначала доставка, потом запись: заявка, отмеченная отвеченной,
+        # но не дошедшая до человека — худший из возможных исходов
+        if not await order_rules.deliver(bot, settings, order, answer):
+            return json_error(
+                "Человеку не доставить — возможно, он закрыл бота", 502, "undelivered"
+            )
+        await order_rules.remember(repo, order, answer, identity.user.id)
+        return json_ok(order_json(order, settings))
+
+
+async def handle_admin_order_decline(request: web.Request) -> web.Response:
+    if (refusal := deny_stranger(request)) is not None:
+        return refusal
+
+    identity: Identity = request[IDENTITY]
+    settings: Settings = request[BRAND]
+    bots: BotProvider = request.app[BOTS]
+
+    async with request.app[SESSIONS]() as session:
+        repo = Repo(session, tenant_id=identity.tenant_id)
+        order = await repo.get_order(int(request.match_info["order_id"]))
+        if order is None:
+            return json_error("Заявка не найдена", 404, "unknown")
+
+        bot = await bots(identity.tenant_id)
+        if bot is None:
+            return json_error("Бот недоступен", 503, "no_bot")
+        await order_rules.decline(bot, settings, repo, order, identity.user.id)
+        return json_ok(order_json(order, settings))
+
+
+async def handle_admin_stats(request: web.Request) -> web.Response:
+    """Цифры хозяина: воронка, деньги, люди.
+
+    Период задаётся днями: 30 — месяц, 0 — всё время. Проценты считает
+    приложение, а здесь только то, что посчитано по базе.
+    """
+    if (refusal := deny_stranger(request)) is not None:
+        return refusal
+
+    identity: Identity = request[IDENTITY]
+    settings: Settings = request[BRAND]
+
+    try:
+        days = int(request.query.get("days", 30))
+    except (TypeError, ValueError):
+        days = 30
+    days = max(0, min(days, 3650))
+    since = None if days == 0 else datetime.now(UTC) - timedelta(days=days)
+
+    async with request.app[SESSIONS]() as session:
+        repo = Repo(session, tenant_id=identity.tenant_id)
+        steps = await repo.funnel(tuple(name for name, _ in analytics.FUNNEL), since)
+        by_tier = await repo.orders_by_tier(since)
+        paid = await repo.payments_summary(since)
+        totals = await repo.stats()
+        subscribers = await repo.count_daily_subscribers()
+
+    return json_ok(
+        {
+            "days": days,
+            "funnel": [
+                {"key": name, "title": label, "count": steps.get(name, 0)}
+                for name, label in analytics.FUNNEL
+            ],
+            "tiers": [
+                {
+                    "key": key,
+                    "title": tier_label(settings, key),
+                    "count": count,
+                }
+                for key, count in by_tier.items()
+            ],
+            "paid": {**paid, "currency": settings.author_currency},
+            "totals": {**totals, "daily_subscribers": subscribers},
+        }
+    )
+
+
 async def handle_promos_list(request: web.Request) -> web.Response:
     if (refusal := deny_stranger(request)) is not None:
         return refusal
@@ -1252,6 +1454,12 @@ def create_app(
     app.router.add_get("/api/orders/{order_id}", handle_order_one)
     app.router.add_post("/api/orders/{order_id}/followup", handle_order_followup)
     app.router.add_get("/api/invite", handle_invite)
+    app.router.add_get("/api/admin/orders", handle_admin_orders)
+    app.router.add_get("/api/admin/orders/{order_id}", handle_admin_order_one)
+    app.router.add_post("/api/admin/orders/{order_id}/take", handle_admin_order_take)
+    app.router.add_post("/api/admin/orders/{order_id}/answer", handle_admin_order_answer)
+    app.router.add_post("/api/admin/orders/{order_id}/decline", handle_admin_order_decline)
+    app.router.add_get("/api/admin/stats", handle_admin_stats)
     app.router.add_get("/api/admin/promos", handle_promos_list)
     app.router.add_post("/api/admin/promos", handle_promo_create)
     app.router.add_post("/api/admin/promos/{promo_id}/active", handle_promo_toggle)

@@ -375,6 +375,16 @@ class Repo:
         )
         return list((await self.session.scalars(stmt)).all())
 
+    async def last_orders(self, limit: int = 20) -> list[Order]:
+        """Последние заявки любого состояния — для стола заявок."""
+        result = await self.session.execute(
+            select(Order)
+            .where(Order.tenant_id == self.tenant_id)
+            .order_by(Order.created_at.desc())
+            .limit(limit)
+        )
+        return list(result.scalars())
+
     async def set_order_status(
         self, order: Order, status: OrderStatus, *, admin_id: int | None = None
     ) -> Order:

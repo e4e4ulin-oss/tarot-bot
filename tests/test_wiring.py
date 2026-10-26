@@ -319,13 +319,55 @@ def test_the_app_can_read_the_author_answer():
 
 
 def test_the_answer_is_written_down_not_only_forwarded():
-    """Копия в чате исчезает из виду; запись остаётся."""
+    """Копия в чате исчезает из виду; запись остаётся.
+
+    Последствия ответа — запись, статус, событие — живут в одном сервисе:
+    из чата и из приложения отвечают по-разному, а засчитывается одинаково.
+    """
+    import inspect
     from pathlib import Path
+
+    from bot.services import orders
+
+    source = inspect.getsource(orders.remember)
+    assert 'add_order_message(order.id, "author"' in source
+    # Записываем до смены статуса: отвеченная заявка без ответа — ложь
+    assert source.index("add_order_message") < source.index("OrderStatus.ANSWERED")
 
     admin = (Path(__file__).resolve().parents[1] / "bot" / "handlers" / "admin.py").read_text(
         "utf-8"
     )
+    assert "orders.remember(" in admin
 
-    assert 'add_order_message(order.id, "author"' in admin
-    # Записываем до смены статуса: отвеченная заявка без ответа — ложь
-    assert admin.index("add_order_message") < admin.index("OrderStatus.ANSWERED, admin_id")
+
+def test_the_owner_has_a_desk_in_the_app():
+    """Заявки и цифры — хозяйские экраны, и сервер проверяет их сам."""
+    from pathlib import Path
+
+    app = (Path(__file__).resolve().parents[1] / "miniapp" / "app.js").read_text("utf-8")
+    api = (Path(__file__).resolve().parents[1] / "bot" / "api" / "app.py").read_text("utf-8")
+
+    for thread in ("admin/orders", "admin/stats", "/answer", "/decline", "/take"):
+        assert thread in app, thread
+
+    # У каждого хозяйского обработчика — своя проверка, а не надежда на вёрстку
+    for handler in (
+        "handle_admin_orders",
+        "handle_admin_order_one",
+        "handle_admin_order_take",
+        "handle_admin_order_answer",
+        "handle_admin_order_decline",
+        "handle_admin_stats",
+    ):
+        body = api.split(f"async def {handler}")[1].split("async def ")[0]
+        assert "deny_stranger(request)" in body, handler
+
+
+def test_an_answer_is_delivered_before_it_is_counted():
+    """Заявка, отмеченная отвеченной, но не дошедшая, — худший исход."""
+    import inspect
+
+    from bot.api.app import handle_admin_order_answer
+
+    source = inspect.getsource(handle_admin_order_answer)
+    assert source.index("deliver(") < source.index("remember(")

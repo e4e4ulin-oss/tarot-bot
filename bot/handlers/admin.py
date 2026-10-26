@@ -15,12 +15,12 @@ from .. import analytics, texts
 from ..config import Settings
 from ..db import Order, OrderStatus, Repo
 from ..filters import IsAdmin
-from ..keyboards import admin_order_menu, back_to_menu, followup_menu
+from ..keyboards import admin_order_menu
 from ..schedule import deadline, format_moment, now
-from ..services import UPDATE_APPLIED, GrokError, Interpreter, ServerOps
+from ..services import UPDATE_APPLIED, GrokError, Interpreter, ServerOps, orders
 from ..services.server import LOGS_DEFAULT, LOGS_MAX, LOGS_MIN
 from ..states import AdminFlow
-from ..tiers import find_tier, followups_allowed, tier_label
+from ..tiers import find_tier, tier_label
 from ..utils import fmt_date
 
 logger = logging.getLogger(__name__)
@@ -82,18 +82,10 @@ async def cb_decline(call: CallbackQuery, repo: Repo, settings: Settings, bot: B
         await call.answer(texts.ERROR, show_alert=True)
         return
 
-    await repo.set_order_status(order, OrderStatus.DECLINED, admin_id=call.from_user.id)
+    await orders.decline(bot, settings, repo, order, call.from_user.id)
     await call.answer(texts.ADMIN_DECLINED.format(order_id=order.id))
     if isinstance(call.message, Message):
         await call.message.answer(texts.ADMIN_DECLINED.format(order_id=order.id))
-
-    try:
-        await bot.send_message(
-            order.user_id,
-            texts.AUTHOR_DECLINED.format(order_id=order.id, author=settings.author_name),
-        )
-    except TelegramAPIError as exc:
-        logger.warning("Не удалось сообщить клиенту об отклонении №%s: %s", order.id, exc)
 
 
 @router.message(AdminFlow.answering)
@@ -114,22 +106,14 @@ async def deliver_answer(
     header = texts.AUTHOR_ANSWER_HEADER.format(author=settings.author_name, order_id=order.id)
     try:
         await bot.send_message(order.user_id, header)
+        # Ответ копируется, а не пересказывается: он может быть и голосом,
+        # и картинкой разложенных карт
         await bot.copy_message(
             chat_id=order.user_id,
             from_chat_id=message.chat.id,
             message_id=message.message_id,
         )
-        left = followups_allowed(settings, order.tier) - (order.followups_used or 0)
-        if left > 0:
-            await bot.send_message(
-                order.user_id,
-                texts.AUTHOR_FOLLOWUP_LEFT.format(left=texts.plural_followups(left)),
-                reply_markup=followup_menu(order.id),
-            )
-        else:
-            await bot.send_message(
-                order.user_id, texts.AUTHOR_FOLLOWUP_NONE, reply_markup=back_to_menu()
-            )
+        await orders.tell_about_followups(bot, settings, order)
     except TelegramAPIError as exc:
         logger.warning("Доставка ответа по заявке №%s не удалась: %s", order.id, exc)
         await message.answer(
@@ -139,13 +123,10 @@ async def deliver_answer(
 
     await state.clear()
     # Текст ответа остаётся у нас: в чат он уходит копией, а в приложении
-    # человек должен его перечитывать, не листая переписку. Голосовой или
-    # картинкой ответ текста не имеет — тогда остаётся пустая реплика, и
-    # приложение честно говорит, что ответ пришёл в чат
+    # человек перечитывает его, не листая переписку. У голосового ответа
+    # текста нет — тогда остаётся пустая реплика, и приложение так и говорит
     body = message.html_text if (message.text or message.caption) else ""
-    await repo.add_order_message(order.id, "author", body)
-    await repo.set_order_status(order, OrderStatus.ANSWERED, admin_id=message.from_user.id)
-    await repo.log_event(order.user_id, analytics.ORDER_ANSWERED, order.tier)
+    await orders.remember(repo, order, body, message.from_user.id)
     await message.answer(texts.ADMIN_ANSWER_SENT.format(order_id=order.id))
 
 

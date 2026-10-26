@@ -754,3 +754,84 @@ async def test_someone_elses_order_is_not_found(client_with_bot):
         data=json.dumps({"text": "чужое"}),
     )
     assert peek.status == 404 and poke.status == 404
+
+
+# --- Стол заявок и статистика у хозяина ----------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_client_cannot_see_the_order_desk(client_with_bot):
+    for path in ("/api/admin/orders", "/api/admin/stats"):
+        res = await client_with_bot.get(path, headers=auth(user_id=CLIENT))
+        assert res.status == 403, path
+
+
+@pytest.mark.asyncio
+async def test_the_owner_answers_from_the_app(client_with_bot):
+    """Ответ из приложения уходит человеку и остаётся в заявке."""
+    from bot.db import Repo
+
+    async with client_with_bot.sessions() as session:
+        repo = Repo(session)
+        await repo.upsert_user(950, "klient", "Клиент")
+        order = await repo.create_order(
+            user_id=950, question="Что с работой?", topic=None, contact="@klient", tier="base"
+        )
+
+    desk = await (
+        await client_with_bot.get("/api/admin/orders", headers=auth(user_id=OWNER))
+    ).json()
+    mine = [row for row in desk["orders"] if row["id"] == order.id]
+    assert mine and mine[0]["client"]["username"] == "klient"
+
+    taken = await client_with_bot.post(
+        f"/api/admin/orders/{order.id}/take", headers=auth(user_id=OWNER)
+    )
+    assert (await taken.json())["status"] == "in_progress"
+
+    sent = await client_with_bot.post(
+        f"/api/admin/orders/{order.id}/answer",
+        headers=auth(user_id=OWNER),
+        data=json.dumps({"text": "Вот разбор: карты говорят о паузе."}),
+    )
+    assert sent.status == 200
+    assert (await sent.json())["status"] == "answered"
+
+    # Человек получил ответ в чат
+    assert any("пауз" in said for _, said in client_with_bot.robot.sent)
+
+    # И видит его у себя в приложении
+    seen = await (
+        await client_with_bot.get(f"/api/orders/{order.id}", headers=auth(user_id=950))
+    ).json()
+    assert [m["text"] for m in seen["thread"]] == ["Вот разбор: карты говорят о паузе."]
+
+
+@pytest.mark.asyncio
+async def test_an_empty_answer_is_refused(client_with_bot):
+    from bot.db import Repo
+
+    async with client_with_bot.sessions() as session:
+        order = await Repo(session).create_order(
+            user_id=951, question="Вопрос", topic=None, contact=None, tier="short"
+        )
+
+    res = await client_with_bot.post(
+        f"/api/admin/orders/{order.id}/answer",
+        headers=auth(user_id=OWNER),
+        data=json.dumps({"text": "   "}),
+    )
+    assert res.status == 400 and (await res.json())["error"] == "empty"
+
+
+@pytest.mark.asyncio
+async def test_the_stats_add_up(client_with_bot):
+    """Цифры считает сервер; приложение их только показывает."""
+    res = await client_with_bot.get("/api/admin/stats?days=0", headers=auth(user_id=OWNER))
+    assert res.status == 200
+
+    data = await res.json()
+    assert data["days"] == 0
+    assert [step["key"] for step in data["funnel"]][0] == "start"
+    assert "users" in data["totals"] and "daily_subscribers" in data["totals"]
+    assert data["paid"]["currency"]

@@ -271,7 +271,15 @@
           </div>
           ${
             me.admin
-              ? `<div class="card tap" data-go="promos">
+              ? `<div class="card tap" data-go="desk">
+                   <h3>Заявки</h3>
+                   <p>Взять в работу, ответить, отклонить</p>
+                 </div>
+                 <div class="card tap" data-go="stats">
+                   <h3>Статистика</h3>
+                   <p>Воронка, оплаты, подписки</p>
+                 </div>
+                 <div class="card tap" data-go="promos">
                    <h3>Промокоды</h3>
                    <p>Завести код и посмотреть, сколько раз его взяли</p>
                  </div>`
@@ -561,6 +569,204 @@
         <div class="card"><div class="reading">${data.text || "Разбор к этому раскладу не сохранился."}</div></div>
         ${data.ai ? "" : '<p class="note">Разбор собран по значениям карт: модель тогда была недоступна.</p>'}`;
       bindProfileBack();
+    } catch (err) {
+      fail(body, err);
+    }
+  };
+
+  /* Стол заявок: то же, что делают кнопки в переписке, но текст ответа
+     набирается в поле, а не в чате — длинный разбор так писать проще. */
+  profileRender.desk = async function deskView() {
+    const body = $("#profile-body");
+    const head = `${backLink("В кабинет", "p-back")}
+      <h3 style="font-family:var(--serif);font-weight:500;font-size:22px;margin:0 0 10px">Заявки</h3>`;
+    body.innerHTML = `${head}<p class="waiting">Смотрю, что пришло…</p>`;
+    bindProfileBack();
+
+    try {
+      const data = await api("admin/orders");
+      if (!data.orders.length) {
+        body.innerHTML = `${head}<div class="card"><h3>Пусто</h3><p>Открытых заявок нет.</p></div>`;
+        bindProfileBack();
+        return;
+      }
+
+      body.innerHTML = `${head}
+        <div class="rows">
+          ${data.orders
+            .map((order) => {
+              const who = order.client.name || `id ${order.client.id}`;
+              return `
+            <button class="row tap" data-order="${order.id}">
+              <span>№${order.id} · ${esc(who)}</span>
+              <b>${esc(order.label || "")} ›</b>
+            </button>`;
+            })
+            .join("")}
+        </div>`;
+      bindProfileBack();
+
+      body.querySelectorAll("[data-order]").forEach((node) =>
+        node.addEventListener("click", () => {
+          tap();
+          deskOrder(node.dataset.order);
+        })
+      );
+    } catch (err) {
+      fail(body, err);
+    }
+  };
+
+  async function deskOrder(id) {
+    const body = $("#profile-body");
+    const head = `${backLink("К заявкам", "p-back")}`;
+    body.innerHTML = `${head}<p class="waiting">Открываю заявку…</p>`;
+    const toDesk = () => {
+      const back = $("#p-back");
+      if (back) back.addEventListener("click", () => { tap(); profileRender.desk(); });
+    };
+    toDesk();
+
+    try {
+      const order = await api(`admin/orders/${encodeURIComponent(id)}`);
+      const who = order.client.username
+        ? `@${esc(order.client.username)}`
+        : esc(order.client.name || `id ${order.client.id}`);
+      const open = order.status === "new" || order.status === "in_progress";
+
+      body.innerHTML = `${head}
+        <h3 style="font-family:var(--serif);font-weight:500;font-size:22px;margin:0 0 4px">Заявка №${order.id}</h3>
+        <p class="lead">${who} · ${esc(order.tier_title || "")} · ${esc(order.label || "")}</p>
+        <div class="card mine">
+          <p class="note">Вопрос · ${esc(dateLabel(order.created_at))}</p>
+          <div class="reading">${esc(order.question || "")}</div>
+        </div>
+        ${order.thread
+          .map(
+            (item) => `
+          <div class="card${item.author === "client" ? " mine" : ""}">
+            <p class="note">${item.author === "client" ? "Уточнение клиента" : "Ваш ответ"} · ${esc(dateLabel(item.created_at))}</p>
+            <div class="reading">${item.text || "— без текста, ответ ушёл в чат —"}</div>
+          </div>`
+          )
+          .join("")}
+        ${
+          order.status === "declined" || order.status === "cancelled"
+            ? ""
+            : `<label class="note">Ответ клиенту</label>
+               <textarea class="field" id="d-text" placeholder="Напишите разбор"></textarea>
+               <button class="btn" id="d-send">Отправить ответ</button>
+               ${open ? '<button class="btn ghost" id="d-take">Взять в работу</button>' : ""}
+               ${open ? '<button class="btn ghost" id="d-no">Отклонить</button>' : ""}
+               <p class="note" id="d-msg"></p>`
+        }`;
+      toDesk();
+
+      const act = async (button, path, body_, after) => {
+        button.disabled = true;
+        $("#d-msg").textContent = "";
+        try {
+          await api(path, { method: "POST", body: body_ ? JSON.stringify(body_) : undefined });
+          tap("medium");
+          after();
+        } catch (err) {
+          $("#d-msg").textContent = err.message;
+          button.disabled = false;
+        }
+      };
+
+      const send = $("#d-send");
+      if (send) {
+        send.addEventListener("click", () => {
+          const answer = ($("#d-text").value || "").trim();
+          if (!answer) {
+            $("#d-msg").textContent = "Ответ пустой.";
+            return;
+          }
+          act(send, `admin/orders/${order.id}/answer`, { text: answer }, () => deskOrder(order.id));
+        });
+      }
+      const take = $("#d-take");
+      if (take) {
+        take.addEventListener("click", () =>
+          act(take, `admin/orders/${order.id}/take`, null, () => deskOrder(order.id))
+        );
+      }
+      const no = $("#d-no");
+      if (no) {
+        no.addEventListener("click", () =>
+          act(no, `admin/orders/${order.id}/decline`, null, () => profileRender.desk())
+        );
+      }
+    } catch (err) {
+      fail(body, err);
+    }
+  }
+
+  /* Статистика: те же цифры, что в /stats, но столбиком и без простыни.
+     Проценты считаются здесь — сервер отдаёт только то, что в базе. */
+  profileRender.stats = async function statsView(period) {
+    // Экраны кабинета зовутся с данными о человеке, а этому нужен период:
+    // чужой аргумент молча уехал бы в адрес запроса
+    const days = typeof period === "number" ? period : 30;
+    const body = $("#profile-body");
+    const head = `${backLink("В кабинет", "p-back")}
+      <h3 style="font-family:var(--serif);font-weight:500;font-size:22px;margin:0 0 10px">Статистика</h3>`;
+    body.innerHTML = `${head}<p class="waiting">Считаю…</p>`;
+    bindProfileBack();
+
+    try {
+      const data = await api(`admin/stats?days=${days}`);
+      let previous = null;
+      const funnel = data.funnel
+        .map((step) => {
+          const share =
+            previous !== null && previous > 0 ? ` · ${Math.round((step.count / previous) * 100)}%` : "";
+          previous = step.count;
+          return `<div class="row"><span>${esc(step.title)}</span><b>${step.count}${share}</b></div>`;
+        })
+        .join("");
+
+      const tiers = data.tiers.length
+        ? data.tiers
+            .map(
+              (tier) =>
+                `<div class="row"><span>${esc(tier.title)}</span><b>${tier.count}</b></div>`
+            )
+            .join("")
+        : "";
+
+      const t = data.totals;
+      body.innerHTML = `${head}
+        <div style="margin:0 0 12px">
+          ${[7, 30, 0]
+            .map(
+              (span) =>
+                `<button class="chip${span === days ? " on" : ""}" data-days="${span}">
+                   ${span === 0 ? "всё время" : span + " дней"}
+                 </button>`
+            )
+            .join("")}
+        </div>
+        <div class="rows" style="margin-bottom:14px">${funnel}</div>
+        ${tiers ? `<h3 style="font-family:var(--serif);font-weight:500;margin:0 2px 8px">Заявки по уровням</h3><div class="rows" style="margin-bottom:14px">${tiers}</div>` : ""}
+        <div class="rows">
+          <div class="row"><span>Оплачено раскладов</span><b>${data.paid.count} на ${data.paid.total} ${esc(data.paid.currency)}</b></div>
+          <div class="row"><span>Людей всего</span><b>${t.users}</b></div>
+          <div class="row"><span>Раскладов всего</span><b>${t.readings}</b></div>
+          <div class="row"><span>Заявок</span><b>${t.orders} (открытых ${t.open_orders})</b></div>
+          <div class="row"><span>Подписаны на карту дня</span><b>${t.daily_subscribers}</b></div>
+          <div class="row"><span>Пришли по приглашению</span><b>${t.invited}</b></div>
+          <div class="row"><span>Промокодов введено</span><b>${t.promo_used}</b></div>
+        </div>`;
+      bindProfileBack();
+
+      body.querySelectorAll("[data-days]").forEach((chip) =>
+        chip.addEventListener("click", () => {
+          tap();
+          profileRender.stats(Number(chip.dataset.days));
+        })
+      );
     } catch (err) {
       fail(body, err);
     }
