@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 EXPLANATION_LIMIT = 300
 
 
-def _explain(response: "httpx.Response") -> str:
+def _explain(response: httpx.Response) -> str:
     """Человеческая часть отказа провайдера."""
     try:
         data = response.json()

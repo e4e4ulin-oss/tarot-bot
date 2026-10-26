@@ -82,6 +82,11 @@ class User(Base):
     birth_tz: Mapped[str | None] = mapped_column(String(48))
     city: Mapped[str | None] = mapped_column(String(64))
 
+    # Когда и сколько раз напоминали про карту дня. Молчание — тоже
+    # обещание: напомнить пару раз можно, долбиться каждый день нельзя
+    nudged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    nudges: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
     # Кто привёл человека в бота. Ставится один раз, при первом входе по
     # ссылке: позже «вспомнить» пригласившего нельзя — иначе награду можно
     # выписать себе задним числом

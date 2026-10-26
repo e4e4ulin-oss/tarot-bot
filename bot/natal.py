@@ -23,8 +23,8 @@ from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
 from . import astro
-from .utils import fmt_day
 from .geo import Place, find
+from .utils import fmt_day
 
 # Без времени считаем на полдень: середина суток ошибается не больше чем на
 # полсуток в любую сторону, и для Солнца этого хватает

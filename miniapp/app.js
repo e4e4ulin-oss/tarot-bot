@@ -163,6 +163,9 @@
     async daily() {
       const body = $("#daily-body");
       try {
+        // Настройки нужны прямо здесь: без них неизвестно, сколько раскладов
+        // обещать новичку, и предложение молча не покажется
+        if (!config) await loadConfig().catch(() => {});
         const data = await api("daily");
         if (!data.card) {
           body.innerHTML = `
@@ -170,7 +173,7 @@
               <img src="assets/empty-card.webp" alt="">
               <p>Карта на сегодня ещё не вытянута.</p>
             </div>
-            <button class="btn" id="daily-draw">Вытянуть карту</button>`;
+            <button class="btn" id="daily-draw">Вытянуть карту</button>${offerFree(data.subscribed)}`;
           $("#daily-draw").addEventListener("click", async (event) => {
             event.target.disabled = true;
             tap("medium");
@@ -184,7 +187,7 @@
           });
           return;
         }
-        body.innerHTML = dailyCard(data.card, data.subscribed);
+        body.innerHTML = offerFree(data.subscribed) + dailyCard(data.card, data.subscribed);
         bindSubscribe();
       } catch (err) {
         if (err.status === 404) {
@@ -463,7 +466,14 @@
         <button class="btn" id="i-share">Отправить другу</button>
         <button class="btn ghost" id="i-copy">Скопировать ссылку</button>
         <div class="rows" style="margin:16px 0 18px">
-          <div class="row"><span>Приглашено</span><b id="i-count">${data.invited}</b></div>
+          <div class="row"><span>Пришли по ссылке</span><b id="i-count">${data.invited}</b></div>
+          ${
+            data.reached && data.invited
+              ? `<div class="row"><span>Из них подписались</span><b>${data.reached.subscribed}</b></div>
+                 <div class="row"><span>Сделали расклад</span><b>${data.reached.with_reading}</b></div>
+                 <div class="row"><span>Оплатили</span><b>${data.reached.paid}</b></div>`
+              : ""
+          }
           <div class="row"><span>Бесплатных раскладов</span>
             <b id="i-left">${data.unlimited ? "без ограничений" : data.free_left}</b></div>
         </div>
@@ -760,6 +770,33 @@
           <div class="row"><span>Промокодов введено</span><b>${t.promo_used}</b></div>
         </div>`;
       bindProfileBack();
+
+      // Кто приводит — отдельным запросом: статистика без него уже готова,
+      // и ждать его, чтобы показать воронку, незачем
+      try {
+        const who = (await api("admin/referrals")).inviters || [];
+        if (who.length) {
+          body.insertAdjacentHTML(
+            "beforeend",
+            `<h3 style="font-family:var(--serif);font-weight:500;margin:18px 2px 8px">Кто приводит</h3>
+             <div class="rows">
+               ${who
+                 .map((host) => {
+                   const name = host.username
+                     ? "@" + esc(host.username)
+                     : esc(host.name || `id ${host.id}`);
+                   return `<div class="row">
+                             <span>${name}</span>
+                             <b>${host.invited} · расклад ${host.with_reading} · оплат ${host.paid}</b>
+                           </div>`;
+                 })
+                 .join("")}
+             </div>`
+          );
+        }
+      } catch (err) {
+        // Список приводящих — дополнение: без него статистика остаётся статистикой
+      }
 
       body.querySelectorAll("[data-days]").forEach((chip) =>
         chip.addEventListener("click", () => {
@@ -1478,6 +1515,20 @@
         button.disabled = false;
       }
     });
+  }
+
+  /* Условие бесплатных раскладов человек должен прочитать до того, как
+     упрётся в него на полпути к раскладу. Поэтому оно стоит на первом экране,
+     пока подписки нет, и исчезает, как только она появилась. */
+  function offerFree(subscribed) {
+    if (subscribed || !config || !config.free_needs_daily || !config.free_readings) return "";
+    const n = config.free_readings;
+    return `
+      <div class="card offer">
+        <h3>${n} ${plural(n, "бесплатный расклад", "бесплатных расклада", "бесплатных раскладов")} — за подписку</h3>
+        <p>Включите утреннюю карту дня — и они откроются сразу.
+           Одна карта в день, отключить можно в любой момент.</p>
+      </div>`;
   }
 
   function dailyCard(card, subscribed) {

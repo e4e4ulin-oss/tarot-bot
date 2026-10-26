@@ -110,6 +110,17 @@ class Settings(BaseSettings):
     service_name: str = Field(default="tarot-bot", alias="SERVICE_NAME")
     update_script: str = Field(default="/usr/local/bin/tarot-update", alias="UPDATE_SCRIPT")
 
+    # --- Напоминание про карту дня ---
+    # Тем, кто зашёл, но не подписался: бесплатные расклады открывает подписка,
+    # и человек может просто не знать об этом. Предел и пауза — чтобы
+    # напоминание не стало рассылкой
+    nudge_enabled: bool = Field(default=True, alias="NUDGE_ENABLED")
+    nudge_hour: int = Field(default=12, alias="NUDGE_HOUR")
+    nudge_after_hours: int = Field(default=20, alias="NUDGE_AFTER_HOURS")
+    nudge_every_days: int = Field(default=7, alias="NUDGE_EVERY_DAYS")
+    nudge_max: int = Field(default=3, alias="NUDGE_MAX")
+    nudge_batch: int = Field(default=25, alias="NUDGE_BATCH")
+
     # --- Приглашения ---
     # Сколько бесплатных раскладов получает пригласивший, когда приглашённый
     # сделал свой первый расклад, и сколько получает сам приглашённый
@@ -145,6 +156,12 @@ class Settings(BaseSettings):
         "grok_temperature",
         "grok_timeout",
         "image_cards_limit",
+        "nudge_enabled",
+        "nudge_hour",
+        "nudge_after_hours",
+        "nudge_every_days",
+        "nudge_max",
+        "nudge_batch",
         "referral_bonus",
         "referral_welcome",
         "max_question_length",

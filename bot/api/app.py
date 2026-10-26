@@ -864,13 +864,16 @@ async def handle_invite(request: web.Request) -> web.Response:
 
     async with session_factory() as session:
         repo = Repo(session, tenant_id=identity.tenant_id)
-        invited = await repo.invited_count(identity.user.id)
+        reached = await repo.invited_summary(identity.user.id)
         access = await check_access(repo, settings, identity.user.id)
 
     return json_ok(
         {
             "link": referrals.link_for(me.username or "", identity.user.id),
-            "invited": invited,
+            "invited": reached["invited"],
+            # Сколько пришло — половина правды: без шагов не видно, приводит
+            # человек клиентов или просто раздаёт ссылку
+            "reached": reached,
             "bonus": settings.referral_bonus,
             "welcome": settings.referral_welcome,
             "free_left": access.free_left,
@@ -1084,6 +1087,17 @@ async def handle_admin_order_decline(request: web.Request) -> web.Response:
             return json_error("Бот недоступен", 503, "no_bot")
         await order_rules.decline(bot, settings, repo, order, identity.user.id)
         return json_ok(order_json(order, settings))
+
+
+async def handle_admin_referrals(request: web.Request) -> web.Response:
+    """Кто сколько привёл и докуда дошли приглашённые."""
+    if (refusal := deny_stranger(request)) is not None:
+        return refusal
+
+    identity: Identity = request[IDENTITY]
+    async with request.app[SESSIONS]() as session:
+        rows = await Repo(session, tenant_id=identity.tenant_id).inviters()
+    return json_ok({"inviters": rows})
 
 
 async def handle_admin_stats(request: web.Request) -> web.Response:
@@ -1460,6 +1474,7 @@ def create_app(
     app.router.add_post("/api/admin/orders/{order_id}/answer", handle_admin_order_answer)
     app.router.add_post("/api/admin/orders/{order_id}/decline", handle_admin_order_decline)
     app.router.add_get("/api/admin/stats", handle_admin_stats)
+    app.router.add_get("/api/admin/referrals", handle_admin_referrals)
     app.router.add_get("/api/admin/promos", handle_promos_list)
     app.router.add_post("/api/admin/promos", handle_promo_create)
     app.router.add_post("/api/admin/promos/{promo_id}/active", handle_promo_toggle)

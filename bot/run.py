@@ -25,6 +25,7 @@ from .middlewares import (
 )
 from .services import GrokClient, Interpreter, ServerOps
 from .services.daily import DailyCards
+from .services.nudge import Nudges
 from .tenants import active_tenants, ensure_default, settings_for
 
 logger = logging.getLogger(__name__)
@@ -158,18 +159,32 @@ async def main() -> None:
         for bot, tenant in zip(bots, tenants, strict=True):
             await bot.set_my_commands(COMMANDS)
             await bot.delete_webhook(drop_pending_updates=True)
+            brand = settings_for(tenant, settings)
             if settings.daily_card_enabled:
                 # У каждого арендатора своя рассылка: свой бот и свои подписчики
-                brand = settings_for(tenant, settings)
                 tasks.append(
                     asyncio.create_task(
                         DailyCards(bot, brand, session_factory, tenant_id=tenant.id).run()
+                    )
+                )
+            if settings.nudge_enabled:
+                # И своё напоминание тем, кто зашёл и не подписался
+                tasks.append(
+                    asyncio.create_task(
+                        Nudges(bot, brand, session_factory, tenant_id=tenant.id).run()
                     )
                 )
             logger.info("Бот «%s» запущен", tenant.title)
 
         if settings.daily_card_enabled:
             logger.info("Карта дня: рассылка в %s:00", settings.daily_card_hour)
+        if settings.nudge_enabled:
+            logger.info(
+                "Напоминание о карте дня: в %s:00, не чаще раза в %s дней, до %s раз",
+                settings.nudge_hour,
+                settings.nudge_every_days,
+                settings.nudge_max,
+            )
         await dp.start_polling(*bots)
     finally:
         for task in tasks:

@@ -30,6 +30,8 @@ DAILY_SENT: Final = "daily_sent"
 REFERRAL_JOIN: Final = "referral_join"
 REFERRAL_REWARD: Final = "referral_reward"
 PROMO_USED: Final = "promo_used"
+# Напоминание о карте дня: по нему видно, сколько подписок оно принесло
+NUDGE_SENT: Final = "nudge_sent"
 
 # Порядок важен: по нему считаются переходы между шагами.
 FUNNEL: Final[tuple[tuple[str, str], ...]] = (

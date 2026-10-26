@@ -835,3 +835,54 @@ async def test_the_stats_add_up(client_with_bot):
     assert [step["key"] for step in data["funnel"]][0] == "start"
     assert "users" in data["totals"] and "daily_subscribers" in data["totals"]
     assert data["paid"]["currency"]
+
+
+@pytest.mark.asyncio
+async def test_the_invite_screen_shows_how_far_guests_got(client_with_bot):
+    """Десять пришедших и ни одного расклада — это не десять клиентов."""
+    from bot.db import Repo
+
+    async with client_with_bot.sessions() as session:
+        repo = Repo(session)
+        await repo.upsert_user(600, None, "Хозяин ссылки")
+        for guest in (601, 602, 603):
+            await repo.upsert_user(guest, None, f"Гость {guest}")
+            await repo.remember_inviter(guest, 600)
+        await repo.set_daily_subscription(601, True)
+        await repo.save_reading(
+            user_id=601, spread_key="day", question=None, cards=[],
+            interpretation="", ai_used=False,
+        )
+        await repo.add_payment(601, 369, "RUB", "charge-601")
+
+    data = await (await client_with_bot.get("/api/invite", headers=auth(user_id=600))).json()
+
+    assert data["invited"] == 3
+    assert data["reached"] == {
+        "invited": 3,
+        "subscribed": 1,
+        "with_reading": 1,
+        "paid": 1,
+    }
+
+
+@pytest.mark.asyncio
+async def test_the_owner_sees_who_brings_people(client_with_bot):
+    from bot.db import Repo
+
+    async with client_with_bot.sessions() as session:
+        repo = Repo(session)
+        await repo.upsert_user(610, "host", "Приводящий")
+        for guest in (611, 612):
+            await repo.upsert_user(guest, None, "Гость")
+            await repo.remember_inviter(guest, 610)
+
+    listing = await (
+        await client_with_bot.get("/api/admin/referrals", headers=auth(user_id=OWNER))
+    ).json()
+    mine = [row for row in listing["inviters"] if row["id"] == 610]
+
+    assert mine and mine[0]["invited"] == 2 and mine[0]["username"] == "host"
+    assert (
+        await client_with_bot.get("/api/admin/referrals", headers=auth(user_id=CLIENT))
+    ).status == 403

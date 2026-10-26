@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import (
     CardImage,
-    OrderMessage,
     DailyCard,
     Event,
     Order,
+    OrderMessage,
     OrderStatus,
     Payment,
     PromoCode,
@@ -161,6 +161,77 @@ class Repo:
             .where(User.tenant_id == self.tenant_id, User.invited_by == user_id)
         )
         return int(result.scalar_one())
+
+    async def invited_summary(self, user_id: int) -> dict[str, int]:
+        """Докуда дошли приглашённые этим человеком.
+
+        Счёт приглашённых сам по себе мало что говорит: десять пришедших и
+        ни одного расклада — это не десять клиентов. Поэтому считаем шаги.
+        """
+        guests = await self.session.execute(
+            select(User.id).where(
+                User.tenant_id == self.tenant_id, User.invited_by == user_id
+            )
+        )
+        ids = [row for (row,) in guests.all()]
+        if not ids:
+            return {"invited": 0, "subscribed": 0, "with_reading": 0, "paid": 0}
+
+        subscribed = await self.session.scalar(
+            select(func.count())
+            .select_from(User)
+            .where(
+                User.tenant_id == self.tenant_id,
+                User.id.in_(ids),
+                User.daily_subscribed.is_(True),
+            )
+        )
+        with_reading = await self.session.scalar(
+            select(func.count(func.distinct(Reading.user_id))).where(
+                Reading.tenant_id == self.tenant_id,
+                Reading.user_id.in_(ids),
+                Reading.mode == ReadingMode.AUTO,
+            )
+        )
+        paid = await self.session.scalar(
+            select(func.count(func.distinct(Payment.user_id))).where(
+                Payment.tenant_id == self.tenant_id, Payment.user_id.in_(ids)
+            )
+        )
+        return {
+            "invited": len(ids),
+            "subscribed": int(subscribed or 0),
+            "with_reading": int(with_reading or 0),
+            "paid": int(paid or 0),
+        }
+
+    async def inviters(self, limit: int = 20) -> list[dict[str, object]]:
+        """Кто сколько привёл — для хозяина, свежие сверху по числу гостей."""
+        counted = await self.session.execute(
+            select(User.invited_by, func.count())
+            .where(User.tenant_id == self.tenant_id, User.invited_by.is_not(None))
+            .group_by(User.invited_by)
+            .order_by(func.count().desc())
+            .limit(limit)
+        )
+        rows = []
+        for inviter_id, count in counted.all():
+            host = await self.session.get(User, (self.tenant_id, inviter_id))
+            rows.append(
+                {
+                    "id": inviter_id,
+                    "name": host.first_name if host else None,
+                    "username": host.username if host else None,
+                    "bonus": (host.bonus_readings or 0) if host else 0,
+                    "invited": int(count),
+                    **{
+                        key: value
+                        for key, value in (await self.invited_summary(inviter_id)).items()
+                        if key != "invited"
+                    },
+                }
+            )
+        return rows
 
     async def promo_by_code(self, code: str) -> PromoCode | None:
         result = await self.session.execute(
@@ -501,6 +572,34 @@ class Repo:
             .limit(limit)
         )
         return list(rows)
+
+    async def nudge_candidates(
+        self, *, older_than: datetime, quiet_until: datetime, limit: int, max_nudges: int
+    ) -> list[User]:
+        """Кто зашёл, но не подписался, и кому давно (или ещё не) напоминали.
+
+        Условия складываются так, чтобы напоминание не превратилось в докучание:
+        человек в боте не первый час, не подписан, напоминаний получил меньше
+        предела, и с прошлого прошло достаточно времени.
+        """
+        result = await self.session.execute(
+            select(User)
+            .where(
+                User.tenant_id == self.tenant_id,
+                User.daily_subscribed.is_(False),
+                User.created_at < older_than,
+                User.nudges < max_nudges,
+                or_(User.nudged_at.is_(None), User.nudged_at < quiet_until),
+            )
+            .order_by(User.created_at)
+            .limit(limit)
+        )
+        return list(result.scalars())
+
+    async def mark_nudged(self, user: User, moment: datetime) -> None:
+        user.nudged_at = moment
+        user.nudges = (user.nudges or 0) + 1
+        await self.session.commit()
 
     async def count_daily_subscribers(self) -> int:
         return int(
