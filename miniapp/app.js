@@ -223,6 +223,14 @@
       try {
         const me = await api("me");
         const r = me.readings;
+        const shop = config || (await loadConfig().catch(() => null));
+        // Цены в кабинете видны всегда, даже когда платить ещё не нужно
+        const prices = shop && shop.auto_price
+          ? {
+              auto: `${shop.auto_price} ${shop.pay_unit || ""}`.trim(),
+              natal: `${shop.natal_price} ${shop.pay_unit || ""}`.trim(),
+            }
+          : null;
         const name = me.user.first_name || "Гость";
         const birth = me.birth.date
           ? `${dateLabel(me.birth.date)}${me.birth.time ? ", " + esc(me.birth.time) : ""}`
@@ -249,6 +257,8 @@
           <div class="rows" style="margin-bottom:12px">
             <div class="row"><span>Бесплатных раскладов</span><b>${r.free_left} из ${r.free_limit}</b></div>
             <div class="row"><span>Всего раскладов</span><b>${r.used}</b></div>
+            ${prices ? `<div class="row"><span>Расклад после бесплатных</span><b>${prices.auto}</b></div>
+            <div class="row"><span>Разбор натальной карты</span><b>${prices.natal}</b></div>` : ""}
             <div class="row"><span>Карта дня по утрам</span><b>${me.daily_subscribed ? "включена" : "выключена"}</b></div>
             <div class="row"><span>Дата рождения</span><b>${birth}</b></div>
             <div class="row"><span>Город</span><b>${esc(me.city || me.birth.city || "не указан")}</b></div>
@@ -1030,12 +1040,37 @@
        <svg><use href="assets/icons.svg#i-back"></use></svg>${esc(label)}
      </button>`;
 
+  // Цену человек должен знать до того, как упрётся в неё. Бесплатных пять, по
+  // два в день, — то есть до платной стены он доходит на третий день, и
+  // узнавать о ней там же, где платить, поздно.
+  function priceNote(data, me) {
+    if (!data.auto_price) return "";
+    const cost = `${data.auto_price} ${data.pay_unit || ""}`.trim();
+    const r = me && me.readings;
+
+    let line;
+    if (me && me.admin) {
+      // Владельцу расклады не лимитируются, и своей цены он никогда не видит.
+      // Поэтому показываем ему цену клиента — иначе проверить её негде
+      line = `Вам расклады бесплатны. Клиент получает ${r ? r.free_limit : ""} бесплатных,
+              не больше ${r ? r.per_day : ""} в день, дальше расклад стоит ${cost}.`;
+    } else if (r && r.free_left > 0) {
+      line = `Бесплатных осталось ${r.free_left} из ${r.free_limit},
+              не больше ${r.per_day} в день. Дальше расклад — ${cost}.`;
+    } else {
+      line = `Бесплатные закончились. Расклад — ${cost}.`;
+    }
+    return `<p class="note" style="margin:0 0 14px">${esc(line.replace(/\s+/g, " "))}</p>`;
+  }
+
   async function spreadList() {
     const body = $("#spread-body");
     flow = null;
     try {
       const data = config || (await loadConfig());
-      body.innerHTML = data.spreads
+      // Остаток свой у каждого: за приглашённых и промокоды он длиннее
+      const me = await api("me").catch(() => null);
+      body.innerHTML = priceNote(data, me) + data.spreads
         .map(
           (s) => `
           <div class="card tap" data-spread="${esc(s.key)}">
