@@ -11,6 +11,7 @@ from .models import (
     CardImage,
     DailyCard,
     Event,
+    GuessGame,
     Order,
     OrderMessage,
     OrderStatus,
@@ -126,6 +127,56 @@ class Repo:
 
         totals = {str(currency or "RUB"): int(total) for currency, _, total in rows}
         return {"count": sum(int(count) for _, count, _ in rows), "totals": totals}
+
+    # --- Партии «карты читают задуманного» ------------------------------
+    async def active_game(self, user_id: int) -> GuessGame | None:
+        """Незаконченная партия. Больше одной такой у человека не бывает."""
+        result = await self.session.execute(
+            select(GuessGame)
+            .where(
+                GuessGame.tenant_id == self.tenant_id,
+                GuessGame.user_id == user_id,
+                GuessGame.status == "active",
+            )
+            .order_by(GuessGame.id.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def last_game(self, user_id: int) -> GuessGame | None:
+        result = await self.session.execute(
+            select(GuessGame)
+            .where(GuessGame.tenant_id == self.tenant_id, GuessGame.user_id == user_id)
+            .order_by(GuessGame.id.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def count_games(self, user_id: int) -> int:
+        """Сколько партий человек уже начинал: первая бесплатна."""
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(GuessGame)
+            .where(GuessGame.tenant_id == self.tenant_id, GuessGame.user_id == user_id)
+        )
+        return int(result.scalar_one())
+
+    async def start_game(self, user_id: int) -> GuessGame:
+        game = GuessGame(tenant_id=self.tenant_id, user_id=user_id, state={})
+        self.session.add(game)
+        await self.session.commit()
+        return game
+
+    async def save_game(self, row: GuessGame, state: dict, status: str) -> None:
+        row.state = state
+        row.status = status
+        if status != "active" and row.finished_at is None:
+            row.finished_at = utcnow()
+        await self.session.commit()
+
+    async def remember_secret(self, row: GuessGame, name: str) -> None:
+        row.secret = name[:128]
+        await self.session.commit()
 
     # --- Пользователи ---------------------------------------------------
     async def upsert_user(

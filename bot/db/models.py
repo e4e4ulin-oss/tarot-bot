@@ -306,6 +306,29 @@ class PromoUse(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class GuessGame(Base):
+    """Партия «карты читают задуманного».
+
+    Ходы лежат одним куском JSON, а не таблицей: их читают только вместе и
+    только целиком — ни искать по ним, ни считать их по отдельности незачем.
+    """
+
+    __tablename__ = "guess_games"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, default=1, index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    status: Mapped[str] = mapped_column(String(16), default="active", index=True)
+    state: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Кого загадали. Заполняется, только когда карты сдались и человек сам
+    # рассказал: по этим записям видно, на ком бот спотыкается
+    secret: Mapped[str | None] = mapped_column(String(128), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+
+
 class Tenant(Base):
     """Бренд, работающий на этом сервисе: один арендатор — один бот.
 
@@ -344,6 +367,7 @@ class Tenant(Base):
     # владельца бота, то есть самого арендатора
     auto_reading_stars: Mapped[int] = mapped_column(Integer, default=50, server_default="50")
     natal_reading_stars: Mapped[int] = mapped_column(Integer, default=150, server_default="150")
+    guess_game_stars: Mapped[int] = mapped_column(Integer, default=100, server_default="100")
 
     miniapp_url: Mapped[str] = mapped_column(String(256), default="")
 

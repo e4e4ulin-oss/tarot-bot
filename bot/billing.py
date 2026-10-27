@@ -27,6 +27,7 @@ STARS_SIGN = "⭐"
 # одного не должна открывать другой.
 PAYLOAD_AUTO = "auto_reading"
 PAYLOAD_NATAL = "natal_reading"
+PAYLOAD_GUESS = "guess_game"
 
 
 @dataclass(frozen=True)
@@ -41,10 +42,23 @@ class Terms:
     description: str
 
 
+# Товары сервиса. Таблицей, а не развилками: товар четвёртый добавится
+# строкой, а не правкой в трёх местах.
+GOODS: dict[str, tuple[str, str, str]] = {
+    PAYLOAD_AUTO: ("auto_reading_stars", "INVOICE_TITLE", "INVOICE_DESCRIPTION"),
+    PAYLOAD_NATAL: ("natal_reading_stars", "INVOICE_NATAL_TITLE", "INVOICE_NATAL_DESCRIPTION"),
+    PAYLOAD_GUESS: ("guess_game_stars", "INVOICE_GUESS_TITLE", "INVOICE_GUESS_DESCRIPTION"),
+}
+
+
 def terms(settings: Settings, payload: str = PAYLOAD_AUTO) -> Terms | None:
     """Во что обойдётся товар. None — платить нечем."""
-    natal = payload == PAYLOAD_NATAL
-    price = settings.natal_reading_stars if natal else settings.auto_reading_stars
+    item = GOODS.get(payload)
+    if item is None:
+        return None
+
+    field, title, description = item
+    price = int(getattr(settings, field))
     if price <= 0:
         # Нулевая цена — не бесплатный товар, а незаполненная настройка:
         # Telegram такой счёт всё равно не примет
@@ -55,8 +69,8 @@ def terms(settings: Settings, payload: str = PAYLOAD_AUTO) -> Terms | None:
         price=price,
         unit=STARS_SIGN,
         currency=STARS_CURRENCY,
-        title=texts.INVOICE_NATAL_TITLE if natal else texts.INVOICE_TITLE,
-        description=texts.INVOICE_NATAL_DESCRIPTION if natal else texts.INVOICE_DESCRIPTION,
+        title=getattr(texts, title),
+        description=getattr(texts, description),
     )
 
 

@@ -360,3 +360,58 @@ def test_an_out_of_turn_answer_is_recognised():
     assert guess.matches(name, guess.LEAD) is False
     assert guess.matches(name, guess.NAME) is True
     assert guess.matches(question, guess.NAME) is False
+
+
+# --- хранение ---------------------------------------------------------------
+
+
+def test_a_party_survives_a_round_trip_through_storage():
+    game = Game(
+        turns=[
+            turn("Он жив?", CARD_NO, guess.NO),
+            naming_turn("Ди Каприо", "Мэтт Дэймон"),
+        ],
+        missed=["Цой"],
+        secret=None,
+    )
+    game.turns[1].verdict = guess.YES
+    game.turns[1].reversed = True
+
+    back = guess.game_of(guess.game_json(game))
+
+    assert guess.facts(back) == guess.facts(game)
+    assert back.missed == ["Цой"]
+    assert back.turns[1].names == ["Ди Каприо", "Мэтт Дэймон"]
+    assert back.turns[1].reversed is True
+    assert back.turns[1].verdict == guess.YES
+
+
+def test_an_empty_row_reads_as_a_fresh_party():
+    for empty in (None, {}):
+        game = guess.game_of(empty)
+        assert game.turns == []
+        assert game.status == guess.ACTIVE
+
+
+# --- что можно нажать и кому можно играть -----------------------------------
+
+
+def test_a_plain_question_takes_all_four_answers():
+    assert guess.options(turn()) == guess.VERDICTS
+
+
+def test_a_follow_up_and_names_take_only_two():
+    assert guess.options(turn(follow_up=True)) == guess.BINARY
+    assert guess.options(naming_turn("А", "Б")) == guess.BINARY
+    assert guess.options(naming_turn("Один")) == guess.BINARY
+
+
+def test_the_first_party_is_free_and_the_next_one_is_not():
+    assert guess.may_start(played=0, free_games=1, paid=False, owner=False) is True
+    assert guess.may_start(played=1, free_games=1, paid=False, owner=False) is False
+    assert guess.may_start(played=1, free_games=1, paid=True, owner=False) is True
+
+
+def test_the_owner_plays_without_paying():
+    """Как и с раскладами: лимит придуман для клиентов."""
+    assert guess.may_start(played=99, free_games=1, paid=False, owner=True) is True

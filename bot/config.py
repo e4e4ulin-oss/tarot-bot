@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     # купленная сотня покрывает ровно два расклада
     auto_reading_stars: int = Field(default=50, alias="AUTO_READING_STARS")
     natal_reading_stars: int = Field(default=150, alias="NATAL_READING_STARS")
+    # Партия «карты читают задуманного». Дороже расклада, потому что ходов в
+    # ней полтора-два десятка, и каждый — обращение к модели
+    guess_game_stars: int = Field(default=100, alias="GUESS_GAME_STARS")
+    # Первая партия бесплатна: иначе никто не узнает, что это такое
+    guess_free_games: int = Field(default=1, alias="GUESS_FREE_GAMES")
 
     # --- Мини-приложение ---
     # Адрес опубликованной колоды. По умолчанию — страница, которую собирает

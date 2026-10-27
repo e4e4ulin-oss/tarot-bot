@@ -376,6 +376,73 @@ def parse(raw: str) -> Step | None:
     return Step(question=question, names=names[:MAX_NAMES], reading=reading)
 
 
+def options(turn: Turn) -> tuple[str, ...]:
+    """Что человеку можно нажать на этом ходу.
+
+    Четыре ответа есть только у обычного вопроса. На уточнении и на именах
+    «возможно» бессмысленно: уточняют как раз затем, чтобы получить прямой
+    ответ.
+    """
+    if turn.names or turn.follow_up:
+        return BINARY
+    return VERDICTS
+
+
+def may_start(*, played: int, free_games: int, paid: bool, owner: bool) -> bool:
+    """Можно ли начать партию прямо сейчас."""
+    if owner:
+        return True
+    if played < free_games:
+        return True
+    return paid
+
+
+def turn_json(turn: Turn) -> dict:
+    """Ход для базы. Хранится как есть: ходы читаются только вместе."""
+    return {
+        "question": turn.question,
+        "names": list(turn.names),
+        "card": turn.card,
+        "reversed": turn.reversed,
+        "answer": turn.card_answer,
+        "reading": turn.reading,
+        "follow_up": turn.follow_up,
+        "verdict": turn.verdict,
+    }
+
+
+def turn_of(data: dict) -> Turn:
+    return Turn(
+        question=str(data.get("question") or ""),
+        names=[str(name) for name in (data.get("names") or [])],
+        card=str(data.get("card") or ""),
+        reversed=bool(data.get("reversed")),
+        card_answer=str(data.get("answer") or CARD_YES),
+        reading=str(data.get("reading") or ""),
+        follow_up=bool(data.get("follow_up")),
+        verdict=data.get("verdict") or None,
+    )
+
+
+def game_json(game: Game) -> dict:
+    return {
+        "turns": [turn_json(turn) for turn in game.turns],
+        "missed": list(game.missed),
+        "status": game.status,
+        "secret": game.secret,
+    }
+
+
+def game_of(data: dict | None) -> Game:
+    data = data or {}
+    return Game(
+        turns=[turn_of(item) for item in (data.get("turns") or [])],
+        missed=[str(name) for name in (data.get("missed") or [])],
+        status=str(data.get("status") or ACTIVE),
+        secret=data.get("secret") or None,
+    )
+
+
 SYSTEM = (
     "Человек загадал известную личность — живую, умершую или вымышленного "
     "персонажа. Ты читаешь его по картам таро: не угадываешь, а предсказываешь "

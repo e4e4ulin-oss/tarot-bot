@@ -24,11 +24,12 @@ from aiohttp import web
 from sqlalchemy import select
 
 from .. import analytics, billing, geo, referrals, texts
+from .. import guess as guess_rules
 from .. import profile as profile_parse
 from .. import promo as promo_rules
 from ..access import check as check_access
 from ..access import owns
-from ..billing import PAYLOAD_AUTO, PAYLOAD_NATAL
+from ..billing import PAYLOAD_AUTO, PAYLOAD_GUESS, PAYLOAD_NATAL
 from ..config import Settings
 from ..db import Repo
 from ..db.models import ORDER_STATUS_LABELS, Order, OrderStatus, ReadingMode, Tenant
@@ -43,9 +44,11 @@ from ..services import orders as order_rules
 from ..services import reading as reading_rules
 from ..services.daily import card_of_the_day
 from ..services.grok import GrokClient, GrokError
+from ..services.guessing import Guessing
 from ..services.interpreter import Interpreter
 from ..services.server import LOGS_DEFAULT
 from ..tarot import SPREAD_ORDER, SPREADS, DrawnCard, deserialize, get_spread
+from ..tarot.deck import get_card
 from ..tenants import cast_field
 from ..tiers import find_tier, followups_allowed, tier_label
 from ..tiers import tiers as author_tiers
@@ -61,6 +64,7 @@ INTERPRETER = web.AppKey("interpreter", Interpreter)
 PENDING = web.AppKey("pending", dict)
 BOTS = web.AppKey("bots", object)
 OPS = web.AppKey("ops", object)
+GUESSING = web.AppKey("guessing", object)
 
 # Сколько ждёт расклад, которому не заказали разбор. Человек видит карты и
 # может закрыть приложение — держать такую запись дольше незачем.
@@ -1471,8 +1475,8 @@ async def handle_invoice(request: web.Request) -> web.Response:
     except Exception:
         payload = {}
 
-    natal = (payload.get("kind") or "auto") == "natal"
-    deal = billing.terms(settings, PAYLOAD_NATAL if natal else PAYLOAD_AUTO)
+    kinds = {"auto": PAYLOAD_AUTO, "natal": PAYLOAD_NATAL, "guess": PAYLOAD_GUESS}
+    deal = billing.terms(settings, kinds.get(str(payload.get("kind") or "auto"), PAYLOAD_AUTO))
     if deal is None:
         return json_error("Автор ещё не подключил приём оплаты", 409, "payment_not_ready")
 
@@ -1482,6 +1486,210 @@ async def handle_invoice(request: web.Request) -> web.Response:
 
     link = await bot.create_invoice_link(**billing.invoice_kwargs(deal))
     return json_ok({"link": link, "price": deal.price, "currency": deal.unit})
+
+
+# --- Партия «карты читают задуманного» --------------------------------------
+# Игра дорогая: ход — обращение к модели, а ходов полтора-два десятка. Поэтому
+# первая партия бесплатна, дальше за звёзды, и незаконченная партия у человека
+# всегда одна: начать вторую, бросив первую, значит заплатить дважды.
+
+
+def turn_payload(turn: guess_rules.Turn) -> dict[str, Any]:
+    drawn = DrawnCard(position="Ответ", card=get_card(turn.card), reversed=turn.reversed)
+    kind = "name" if turn.is_naming else "lead" if turn.is_lead else "question"
+    return {
+        "kind": kind,
+        "question": turn.question,
+        "names": list(turn.names),
+        "names_line": turn.names_line,
+        "reading": turn.reading,
+        "card": card_payload(drawn),
+        "card_answer": turn.card_answer,
+        "follow_up": turn.follow_up,
+        "verdict": turn.verdict,
+        "options": list(guess_rules.options(turn)),
+    }
+
+
+def game_payload(game: guess_rules.Game, settings: Settings) -> dict[str, Any]:
+    pending = game.pending
+    return {
+        "status": game.status,
+        "asked": game.asked,
+        "left": game.left,
+        "missed": list(game.missed),
+        "secret": game.secret,
+        "turn": turn_payload(pending) if pending is not None else None,
+        "history": [turn_payload(turn) for turn in game.turns if turn.graded],
+        "free_games": settings.guess_free_games,
+    }
+
+
+async def guess_offer(repo: Repo, settings: Settings, user_id: int) -> dict[str, Any]:
+    """Условия, на которых можно начать: бесплатно, за звёзды или никак."""
+    played = await repo.count_games(user_id)
+    owner = owns(settings, user_id)
+    paid = await repo.unspent_payment(user_id, PAYLOAD_GUESS)
+    deal = billing.terms(settings, PAYLOAD_GUESS)
+    return {
+        "played": played,
+        "free_games": settings.guess_free_games,
+        "free_left": max(0, settings.guess_free_games - played) if not owner else None,
+        "paid": paid is not None,
+        "price": deal.price if deal else 0,
+        "unit": deal.unit if deal else "",
+        "can_start": guess_rules.may_start(
+            played=played,
+            free_games=settings.guess_free_games,
+            paid=paid is not None,
+            owner=owner,
+        ),
+    }
+
+
+async def handle_guess_state(request: web.Request) -> web.Response:
+    """Текущая партия и условия новой."""
+    identity: Identity = request[IDENTITY]
+    settings: Settings = request[BRAND]
+
+    async with request.app[SESSIONS]() as session:
+        repo = Repo(session, tenant_id=identity.tenant_id)
+        row = await repo.active_game(identity.user.id)
+        if row is None:
+            row = await repo.last_game(identity.user.id)
+        offer = await guess_offer(repo, settings, identity.user.id)
+        game = guess_rules.game_of(row.state) if row is not None else None
+
+    return json_ok(
+        {
+            "game": game_payload(game, settings) if game is not None else None,
+            "offer": offer,
+        }
+    )
+
+
+async def handle_guess_start(request: web.Request) -> web.Response:
+    identity: Identity = request[IDENTITY]
+    settings: Settings = request[BRAND]
+    guessing: Guessing = request.app[GUESSING]
+
+    if not guessing.enabled:
+        return json_error("Без модели карты молчат", 503, "no_model")
+
+    async with request.app[SESSIONS]() as session:
+        repo = Repo(session, tenant_id=identity.tenant_id)
+        running = await repo.active_game(identity.user.id)
+        if running is not None:
+            # Вторая партия поверх первой — двойная плата ни за что
+            game = guess_rules.game_of(running.state)
+            return json_ok({"game": game_payload(game, settings)})
+
+        offer = await guess_offer(repo, settings, identity.user.id)
+        if not offer["can_start"]:
+            return json_error("Партия оплачивается отдельно", 402, "needs_payment")
+
+        game = guess_rules.Game()
+        try:
+            turn = await guessing.step(
+                game,
+                allow_reversed=settings.allow_reversed,
+                reversed_chance=settings.reversed_chance,
+            )
+        except (GrokError, TimeoutError) as exc:
+            logger.warning("Партия не началась: %s", exc)
+            return json_error("Карты не отозвались, попробуйте ещё раз", 503, "no_model")
+
+        # Платим только теперь: до первого хода игры ещё нет, и списывать
+        # звёзды за несостоявшуюся партию нельзя
+        paid = await repo.unspent_payment(identity.user.id, PAYLOAD_GUESS)
+        if paid is not None and not owns(settings, identity.user.id):
+            played = await repo.count_games(identity.user.id)
+            if played >= settings.guess_free_games:
+                await repo.spend_payment(paid)
+
+        game.turns.append(turn)
+        row = await repo.start_game(identity.user.id)
+        await repo.save_game(row, guess_rules.game_json(game), game.status)
+        await repo.log_event(identity.user.id, analytics.GUESS_STARTED)
+
+    return json_ok({"game": game_payload(game, settings)})
+
+
+async def handle_guess_answer(request: web.Request) -> web.Response:
+    identity: Identity = request[IDENTITY]
+    settings: Settings = request[BRAND]
+    guessing: Guessing = request.app[GUESSING]
+
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    verdict = str(payload.get("verdict") or "").strip()
+
+    async with request.app[SESSIONS]() as session:
+        repo = Repo(session, tenant_id=identity.tenant_id)
+        row = await repo.active_game(identity.user.id)
+        if row is None:
+            return json_error("Партия не начата", 404, "no_game")
+
+        game = guess_rules.game_of(row.state)
+        try:
+            guess_rules.grade(game, verdict)
+        except ValueError as exc:
+            return json_error(str(exc), 400, "bad_verdict")
+
+        if guess_rules.finished(game):
+            await repo.save_game(row, guess_rules.game_json(game), game.status)
+            await repo.log_event(
+                identity.user.id,
+                analytics.GUESS_WON if game.status == guess_rules.WON else analytics.GUESS_LOST,
+            )
+            return json_ok({"game": game_payload(game, settings)})
+
+        try:
+            turn = await guessing.step(
+                game,
+                allow_reversed=settings.allow_reversed,
+                reversed_chance=settings.reversed_chance,
+            )
+        except (GrokError, TimeoutError) as exc:
+            # Оценку сохраняем всё равно: она уже дана, и терять её нельзя
+            await repo.save_game(row, guess_rules.game_json(game), game.status)
+            logger.warning("Ход не состоялся: %s", exc)
+            return json_error("Карты не отозвались, попробуйте ещё раз", 503, "no_model")
+
+        game.turns.append(turn)
+        await repo.save_game(row, guess_rules.game_json(game), game.status)
+
+    return json_ok({"game": game_payload(game, settings)})
+
+
+async def handle_guess_secret(request: web.Request) -> web.Response:
+    """Кого загадали. Спрашивается, только когда карты сдались."""
+    identity: Identity = request[IDENTITY]
+    settings: Settings = request[BRAND]
+
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    name = str(payload.get("name") or "").strip()
+    if not name:
+        return json_error("Имя пустое", 400, "empty")
+
+    async with request.app[SESSIONS]() as session:
+        repo = Repo(session, tenant_id=identity.tenant_id)
+        row = await repo.last_game(identity.user.id)
+        if row is None or row.status != guess_rules.LOST:
+            return json_error("Нечего рассказывать", 404, "no_game")
+        if row.secret:
+            return json_error("Уже рассказано", 409, "told")
+
+        await repo.remember_secret(row, name)
+        game = guess_rules.game_of(row.state)
+        game.secret = row.secret
+
+    return json_ok({"game": game_payload(game, settings)})
 
 
 @dataclass
@@ -1650,6 +1858,7 @@ def create_app(
     interpreter: Interpreter | None = None,
     bots: BotProvider | None = None,
     ops: ServerOps | None = None,
+    guessing: Guessing | None = None,
 ) -> web.Application:
     app = web.Application(
         middlewares=[errors_middleware, auth_middleware(tokens, brands)],
@@ -1669,6 +1878,10 @@ def create_app(
     app[BOTS] = bots or _no_bot
     # Присмотр снаружи спрашивает то же, что команды в чате
     app[OPS] = ops or ServerOps(settings.service_name, settings.update_script)
+    # Партия ходит к той же модели, что и разборы: отдельный ключ ей не нужен
+    app[GUESSING] = guessing or Guessing(
+        app[INTERPRETER].grok, deadline=settings.grok_deadline
+    )
 
     app.router.add_get("/api/health", handle_health)
     app.router.add_get("/api/config", handle_config)
@@ -1696,6 +1909,10 @@ def create_app(
     app.router.add_get("/api/ops/status", handle_ops_status)
     app.router.add_get("/api/ops/logs", handle_ops_logs)
     app.router.add_post("/api/ops/set", handle_ops_set)
+    app.router.add_get("/api/guess", handle_guess_state)
+    app.router.add_post("/api/guess", handle_guess_start)
+    app.router.add_post("/api/guess/answer", handle_guess_answer)
+    app.router.add_post("/api/guess/secret", handle_guess_secret)
     app.router.add_get("/api/admin/orders", handle_admin_orders)
     app.router.add_get("/api/admin/orders/{order_id}", handle_admin_order_one)
     app.router.add_post("/api/admin/orders/{order_id}/take", handle_admin_order_take)

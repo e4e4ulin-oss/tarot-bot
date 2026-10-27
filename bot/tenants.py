@@ -36,6 +36,7 @@ def overrides(tenant: Tenant) -> dict[str, object]:
         "free_daily_limit": tenant.free_daily_limit,
         "auto_reading_stars": tenant.auto_reading_stars,
         "natal_reading_stars": tenant.natal_reading_stars,
+        "guess_game_stars": tenant.guess_game_stars,
         "miniapp_url": tenant.miniapp_url or Settings.model_fields["miniapp_url"].default,
     }
 
@@ -53,6 +54,7 @@ EDITABLE: dict[str, type] = {
     "price_full": int,
     "auto_reading_stars": int,
     "natal_reading_stars": int,
+    "guess_game_stars": int,
     "free_auto_readings": int,
     "free_without_daily": int,
     "free_daily_limit": int,
@@ -119,6 +121,7 @@ async def ensure_default(session: AsyncSession, settings: Settings) -> Tenant | 
         free_needs_daily=settings.free_needs_daily,
         auto_reading_stars=settings.auto_reading_stars,
         natal_reading_stars=settings.natal_reading_stars,
+        guess_game_stars=settings.guess_game_stars,
         miniapp_url=settings.miniapp_url,
     )
     session.add(tenant)

@@ -33,6 +33,12 @@ PROMO_USED: Final = "promo_used"
 # Напоминание о карте дня: по нему видно, сколько подписок оно принесло
 NUDGE_SENT: Final = "nudge_sent"
 
+# Партия «карты читают задуманного»: отдельная история, не шаг к заказу.
+# Проигрыши считаем не ради статистики, а чтобы видеть, на ком бот стопорится
+GUESS_STARTED: Final = "guess_started"
+GUESS_WON: Final = "guess_won"
+GUESS_LOST: Final = "guess_lost"
+
 # Порядок важен: по нему считаются переходы между шагами.
 FUNNEL: Final[tuple[tuple[str, str], ...]] = (
     (START, "Зашли в бота"),
