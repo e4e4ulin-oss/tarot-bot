@@ -928,3 +928,37 @@ async def test_the_owner_sees_who_brings_people(client_with_bot):
     assert (
         await client_with_bot.get("/api/admin/referrals", headers=auth(user_id=CLIENT))
     ).status == 403
+
+
+@pytest.mark.asyncio
+async def test_the_shop_front_shows_the_tenant_price_not_the_process_one(tmp_path):
+    """Цена на витрине и цена в счёте — одно число, и берётся оно из базы.
+
+    Витрина открыта до входа, и раньше она читала настройки процесса, то есть
+    .env, а счёт выставлялся по строке арендатора. Пока они совпадали, этого
+    никто не видел. Разойдясь, они показывали 50 звёзд и списывали 250.
+    """
+    engine = create_engine(f"sqlite+aiosqlite:///{tmp_path}/front.db")
+    await init_models(engine)
+    factory = create_session_factory(engine)
+
+    process = Settings(AUTO_READING_STARS=50, NATAL_READING_STARS=150, FREE_AUTO_READINGS=5)
+    tenant = Settings(AUTO_READING_STARS=250, NATAL_READING_STARS=650, FREE_AUTO_READINGS=3)
+
+    async def tokens() -> dict[int, str]:
+        return {1: process.bot_token}
+
+    async def brands(tenant_id: int) -> Settings:
+        return tenant
+
+    client = TestClient(TestServer(create_app(process, factory, tokens, brands)))
+    await client.start_server()
+    try:
+        data = await (await client.get("/api/config")).json()
+        assert data["auto_price"] == 250
+        assert data["natal_price"] == 650
+        assert data["free_readings"] == 3
+        assert data["pay_unit"] == "⭐"
+    finally:
+        await client.close()
+        await engine.dispose()

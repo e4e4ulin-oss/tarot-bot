@@ -72,6 +72,10 @@ NUMBER_LIMIT = 99
 # на экране входа, ещё не зная, кто перед ним.
 PUBLIC_PATHS = frozenset({"/api/health", "/api/config"})
 
+# Чей прилавок показывать тому, кто ещё не вошёл. Витрина одна на домен, и
+# домен принадлежит первому арендатору: у франчайзи свой адрес и свой номер.
+DEFAULT_TENANT = 1
+
 # Служебный адрес проверяет себя сам: подписи Telegram у присмотра снаружи нет
 OPS_PREFIX = "/api/ops/"
 
@@ -129,13 +133,19 @@ def auth_middleware(tokens: TokensProvider, brands: BrandProvider):
 
     @web.middleware
     async def middleware(request: web.Request, handler):
-        if request.path in PUBLIC_PATHS or request.path.startswith(OPS_PREFIX):
+        if request.path == "/api/health" or request.path.startswith(OPS_PREFIX):
             return await handler(request)
 
         init_data = init_data_from_header(request.headers.get("Authorization"))
         try:
             identity = verify(init_data, await tokens())
         except AuthError as exc:
+            if request.path in PUBLIC_PATHS:
+                # Витрина открывается и до входа. Настройки ей всё равно нужны
+                # арендаторские: цены лежат в базе, и показать одно, а списать
+                # другое — худшее, что приложение может сделать с покупателем
+                request[BRAND] = await brands(DEFAULT_TENANT)
+                return await handler(request)
             identity = dev_identity(request, request.app[BRAND])
             if identity is None:
                 return json_error(str(exc), 401, "unauthorized")
@@ -166,7 +176,7 @@ async def handle_health(request: web.Request) -> web.Response:
 
 async def handle_config(request: web.Request) -> web.Response:
     """Витрина до входа: чей это бренд, какие раскладки и почём разборы."""
-    settings: Settings = request.app[BRAND]
+    settings: Settings = request[BRAND]
     auto = billing.terms(settings, PAYLOAD_AUTO)
     natal = billing.terms(settings, PAYLOAD_NATAL)
     return json_ok(
