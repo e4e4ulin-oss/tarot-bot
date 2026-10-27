@@ -136,6 +136,11 @@ class Settings(BaseSettings):
     referral_bonus: int = Field(default=2, alias="REFERRAL_BONUS")
     referral_welcome: int = Field(default=1, alias="REFERRAL_WELCOME")
 
+    # --- Служебный адрес ---
+    # Секрет для /api/ops: без него адреса нет вовсе. Нужен для присмотра за
+    # сервером снаружи — версия, состояние службы, хвост журнала. Только чтение
+    ops_token: str = Field(default="", alias="OPS_TOKEN")
+
     # --- Хранилище ---
     database_url: str = Field(default="sqlite+aiosqlite:///data/tarot.db", alias="DATABASE_URL")
 

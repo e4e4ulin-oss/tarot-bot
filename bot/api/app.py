@@ -38,11 +38,13 @@ from ..natal import full as natal_full
 from ..natal import timeline as natal_timeline
 from ..profile import describe, stored_place
 from ..schedule import now
+from ..services import ServerOps
 from ..services import orders as order_rules
 from ..services import reading as reading_rules
 from ..services.daily import card_of_the_day
 from ..services.grok import GrokClient, GrokError
 from ..services.interpreter import Interpreter
+from ..services.server import LOGS_DEFAULT
 from ..tarot import SPREAD_ORDER, SPREADS, DrawnCard, deserialize, get_spread
 from ..tiers import find_tier, followups_allowed, tier_label
 from ..tiers import tiers as author_tiers
@@ -57,6 +59,7 @@ SESSIONS = web.AppKey("session_factory", object)
 INTERPRETER = web.AppKey("interpreter", Interpreter)
 PENDING = web.AppKey("pending", dict)
 BOTS = web.AppKey("bots", object)
+OPS = web.AppKey("ops", object)
 
 # Сколько ждёт расклад, которому не заказали разбор. Человек видит карты и
 # может закрыть приложение — держать такую запись дольше незачем.
@@ -68,6 +71,9 @@ NUMBER_LIMIT = 99
 # Эти адреса отвечают без подписи: по ним приложение решает, что показывать
 # на экране входа, ещё не зная, кто перед ним.
 PUBLIC_PATHS = frozenset({"/api/health", "/api/config"})
+
+# Служебный адрес проверяет себя сам: подписи Telegram у присмотра снаружи нет
+OPS_PREFIX = "/api/ops/"
 
 TokensProvider = Callable[[], Awaitable[dict[int, str]]]
 BrandProvider = Callable[[int], Awaitable[Settings]]
@@ -123,7 +129,7 @@ def auth_middleware(tokens: TokensProvider, brands: BrandProvider):
 
     @web.middleware
     async def middleware(request: web.Request, handler):
-        if request.path in PUBLIC_PATHS:
+        if request.path in PUBLIC_PATHS or request.path.startswith(OPS_PREFIX):
             return await handler(request)
 
         init_data = init_data_from_header(request.headers.get("Authorization"))
@@ -968,6 +974,72 @@ def deny_stranger(request: web.Request) -> web.Response | None:
     return json_error("Это хозяйский экран", 403, "forbidden")
 
 
+# --- Присмотр за сервером снаружи ----------------------------------------
+# Только чтение: версия, состояние службы, хвост журнала. Ни обновления, ни
+# перезапуска здесь нет и быть не должно — это доступ для глаз, а не для рук.
+
+
+def ops_allowed(request: web.Request) -> web.Response | None:
+    """Пускает по секрету из заголовка. Без секрета в настройках адреса нет."""
+    settings: Settings = request.app[BRAND]
+    expected = (settings.ops_token or "").strip()
+    if not expected:
+        # Не «403», а «нет такого»: о выключенном адресе знать незачем
+        return json_error("Не найдено", 404, "not_found")
+
+    given = request.headers.get("X-Ops-Token", "")
+    # Сравниваем байтами: compare_digest на строках с кириллицей падает,
+    # а секрет вполне может оказаться русским словом
+    if not secrets.compare_digest(given.encode(), expected.encode()):
+        return json_error("Не найдено", 404, "not_found")
+    return None
+
+
+async def handle_ops_status(request: web.Request) -> web.Response:
+    """Что выложено, жива ли служба и отвечает ли база."""
+    if (refusal := ops_allowed(request)) is not None:
+        return refusal
+
+    ops: ServerOps = request.app[OPS]
+    version = await ops.version()
+    state = await ops.state()
+
+    async with request.app[SESSIONS]() as session:
+        counts = await Repo(session).stats()
+
+    # systemctl отдаёт строки вида «ActiveState=active» — разбираем в словарь
+    service = {}
+    for line in state.output.splitlines():
+        if "=" in line:
+            key, _, value = line.partition("=")
+            service[key.strip()] = value.strip()
+
+    return json_ok(
+        {
+            "ok": True,
+            "time": datetime.now(UTC).isoformat(),
+            "version": version.output.strip() if version.ok else None,
+            "version_error": None if version.ok else version.output.strip()[:200],
+            "service": service or {"error": state.output.strip()[:200]},
+            "counts": counts,
+        }
+    )
+
+
+async def handle_ops_logs(request: web.Request) -> web.Response:
+    """Хвост журнала — тот же, что отдаёт команда /logs в чате."""
+    if (refusal := ops_allowed(request)) is not None:
+        return refusal
+
+    try:
+        lines = int(request.query.get("lines", LOGS_DEFAULT))
+    except (TypeError, ValueError):
+        lines = LOGS_DEFAULT
+
+    result = await request.app[OPS].logs(lines)
+    return json_ok({"ok": result.ok, "code": result.code, "text": result.output})
+
+
 async def handle_admin_orders(request: web.Request) -> web.Response:
     """Стол заявок: что пришло, что в работе, что отвечено."""
     if (refusal := deny_stranger(request)) is not None:
@@ -1464,6 +1536,7 @@ def create_app(
     brands: BrandProvider,
     interpreter: Interpreter | None = None,
     bots: BotProvider | None = None,
+    ops: ServerOps | None = None,
 ) -> web.Application:
     app = web.Application(
         middlewares=[errors_middleware, auth_middleware(tokens, brands)],
@@ -1481,6 +1554,8 @@ def create_app(
     app[PENDING] = {}
     # Заявки и счета уходят через бота того же арендатора
     app[BOTS] = bots or _no_bot
+    # Присмотр снаружи спрашивает то же, что команды в чате
+    app[OPS] = ops or ServerOps(settings.service_name, settings.update_script)
 
     app.router.add_get("/api/health", handle_health)
     app.router.add_get("/api/config", handle_config)
@@ -1505,6 +1580,8 @@ def create_app(
     app.router.add_get("/api/orders/{order_id}", handle_order_one)
     app.router.add_post("/api/orders/{order_id}/followup", handle_order_followup)
     app.router.add_get("/api/invite", handle_invite)
+    app.router.add_get("/api/ops/status", handle_ops_status)
+    app.router.add_get("/api/ops/logs", handle_ops_logs)
     app.router.add_get("/api/admin/orders", handle_admin_orders)
     app.router.add_get("/api/admin/orders/{order_id}", handle_admin_order_one)
     app.router.add_post("/api/admin/orders/{order_id}/take", handle_admin_order_take)

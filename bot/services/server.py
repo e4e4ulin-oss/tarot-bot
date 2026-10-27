@@ -91,6 +91,16 @@ class ServerOps:
         count = max(LOGS_MIN, min(LOGS_MAX, lines))
         return await self._run("journalctl", "-u", self.service, "-n", str(count), "--no-pager")
 
+    async def version(self, directory: str = "/opt/tarot-bot") -> CommandResult:
+        """Какой коммит выложен. Аргументы фиксированы, sudo не нужен."""
+        return await self._run("git", "-C", directory, "log", "-1", "--format=%h %cI %s")
+
+    async def state(self) -> CommandResult:
+        """Состояние службы по мнению systemd. Чтение прав не требует."""
+        return await self._run(
+            "systemctl", "show", self.service, "-p", "ActiveState", "-p", "ActiveEnterTimestamp"
+        )
+
     async def update(self) -> CommandResult:
         """Подтянуть код из GitHub, не перезапуская: перезапуск — отдельным шагом."""
         return await self._run("sudo", "-n", self.update_script, "--no-restart")
