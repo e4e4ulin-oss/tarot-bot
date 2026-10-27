@@ -297,3 +297,66 @@ def test_the_names_line_reads_like_speech():
     assert naming_turn("Ди Каприо", "Мэтт Дэймон").names_line == "Ди Каприо или Мэтт Дэймон"
     assert naming_turn("А", "Б", "В").names_line == "А, Б или В"
     assert naming_turn("Один").names_line == "Один"
+
+
+# --- очередь ходов ----------------------------------------------------------
+
+
+def questions(count, verdict=guess.YES):
+    return [turn(verdict=verdict) for _ in range(count)]
+
+
+def test_the_first_turns_are_questions_not_hunches():
+    """Каждый ход гадать, кто это, — допрос, а не расклад."""
+    for asked in range(guess.LEAD_EVERY):
+        assert guess.mode(Game(turns=questions(asked))) == guess.QUESTION
+
+
+def test_the_type_is_shown_about_every_fifth_turn():
+    assert guess.mode(Game(turns=questions(guess.LEAD_EVERY))) == guess.LEAD
+
+
+def test_the_count_starts_over_from_the_last_type_shown():
+    """Считаем от показанного типажа, а не по остатку от деления."""
+    game = Game(turns=questions(guess.LEAD_EVERY) + [naming_turn("А", "Б")])
+    game.turns[-1].verdict = guess.NO
+    assert guess.mode(game) == guess.QUESTION
+
+    game.turns.extend(questions(guess.LEAD_EVERY))
+    assert guess.mode(game) == guess.LEAD
+
+
+def test_pressing_a_rejected_card_outranks_the_queue():
+    """Тема осталась открытой — её дожимают, даже если подошла очередь типажа."""
+    game = Game(turns=questions(guess.LEAD_EVERY - 1) + [turn(verdict=guess.NO)])
+    assert guess.since_lead(game) >= guess.LEAD_EVERY
+    assert guess.mode(game) == guess.QUESTION
+
+
+def test_the_name_outranks_the_type():
+    game = Game(turns=questions(guess.GUESS_AFTER))
+    assert guess.mode(game) == guess.NAME
+
+
+def test_the_prompt_forbids_names_when_a_question_is_due():
+    text = guess.prompt(Game(), "Шут", CARD_YES)
+    assert "Сейчас задай вопрос" in text
+    assert "Имена не называй" in text
+
+
+def test_the_prompt_asks_for_a_type_when_it_is_due():
+    text = guess.prompt(Game(turns=questions(guess.LEAD_EVERY)), "Звезда", CARD_YES)
+    assert "показать направление" in text
+
+
+def test_an_out_of_turn_answer_is_recognised():
+    question = guess.Step(question="Он жив?")
+    lead = guess.Step(names=["А", "Б"])
+    name = guess.Step(names=["А"])
+
+    assert guess.matches(question, guess.QUESTION) is True
+    assert guess.matches(lead, guess.QUESTION) is False
+    assert guess.matches(lead, guess.LEAD) is True
+    assert guess.matches(name, guess.LEAD) is False
+    assert guess.matches(name, guess.NAME) is True
+    assert guess.matches(question, guess.NAME) is False

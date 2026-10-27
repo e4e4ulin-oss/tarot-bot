@@ -111,3 +111,27 @@ async def test_without_a_model_there_is_no_game():
     """Заготовки из базы значений тут не спасают: вопрос придумать некому."""
     with pytest.raises(GrokError):
         await Guessing(GrokClient(api_key="")).step(Game())
+
+
+@pytest.mark.asyncio
+async def test_a_name_out_of_turn_is_asked_again():
+    """Очередь — правило, а не пожелание: сначала переспрашиваем."""
+    grok = client(
+        '{"names": ["Пушкин"], "reading": "Карты торопятся"}',
+        '{"question": "Он жив?", "reading": "Солнце светит"}',
+    )
+    turn = await Guessing(grok).step(Game())
+
+    assert turn.question == "Он жив?"
+    assert turn.names == []
+    assert len(grok.asked) == 2  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_a_stubborn_model_does_not_break_the_party():
+    """Партия важнее порядка: упёрлась — берём что дала."""
+    grok = client('{"names": ["Пушкин"], "reading": "Карты настаивают"}')
+    turn = await Guessing(grok).step(Game())
+
+    assert turn.is_naming is True
+    assert turn.names == ["Пушкин"]
