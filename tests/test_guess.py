@@ -415,3 +415,44 @@ def test_the_first_party_is_free_and_the_next_one_is_not():
 def test_the_owner_plays_without_paying():
     """Как и с раскладами: лимит придуман для клиентов."""
     assert guess.may_start(played=99, free_games=1, paid=False, owner=True) is True
+
+
+# --- круг игрока ------------------------------------------------------------
+
+
+def test_age_counts_whole_years_and_waits_for_the_birthday():
+    from datetime import date
+
+    assert guess.years(date(1975, 6, 1), date(2026, 10, 28)) == 51
+    assert guess.years(date(1975, 12, 1), date(2026, 10, 28)) == 50
+    assert guess.years(date(2026, 10, 28), date(2026, 10, 28)) == 0
+
+
+def test_a_missing_or_absurd_birthday_gives_no_age():
+    from datetime import date
+
+    assert guess.years(None) is None
+    assert guess.years(date(1700, 1, 1), date(2026, 10, 28)) is None
+    assert guess.years(date(2030, 1, 1), date(2026, 10, 28)) is None
+
+
+def test_the_circle_is_described_from_what_is_known():
+    assert guess.audience(age=51, city="Москва") == "51 лет, живёт: Москва"
+    assert guess.audience(age=51) == "51 лет"
+    assert guess.audience(age=None, city="Казань") == "живёт: Казань"
+    assert guess.audience(age=None, city=None) == ""
+
+
+def test_the_circle_is_a_hint_and_the_prompt_says_so():
+    """Пятидесятилетний из России думает о Цое, но может и о Кендрике Ламаре."""
+    text = guess.prompt(Game(), "Шут", CARD_YES, about="51 лет, живёт: Москва")
+
+    assert "51 лет, живёт: Москва" in text
+    assert "из своего круга" in text
+    # Главное — что это не запрет: иначе бот отбросит верный ответ
+    assert "иди за фактами" in text
+
+
+def test_an_unknown_circle_adds_nothing_to_the_prompt():
+    text = guess.prompt(Game(), "Шут", CARD_YES)
+    assert "Загадывает человек" not in text

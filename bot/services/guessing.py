@@ -42,6 +42,7 @@ class Guessing:
         *,
         allow_reversed: bool = True,
         reversed_chance: float = 0.4,
+        about: str = "",
     ) -> Turn:
         """Следующий ход. Карта тянется до обращения к модели — и честно."""
         if not self.grok.enabled:
@@ -50,7 +51,7 @@ class Guessing:
         card, answer = guess.decisive(
             allow_reversed=allow_reversed, reversed_chance=reversed_chance
         )
-        step = await self._ask(game, card, answer)
+        step = await self._ask(game, card, answer, about)
 
         return Turn(
             question=step.question,
@@ -64,13 +65,15 @@ class Guessing:
             follow_up=guess.needs_follow_up(game) and not step.names,
         )
 
-    async def _ask(self, game: Game, card: DrawnCard, answer: str) -> guess.Step:
+    async def _ask(
+        self, game: Game, card: DrawnCard, answer: str, about: str = ""
+    ) -> guess.Step:
         """Спрашивает модель, пока она не сделает то, что требуется ходом.
 
         Очередь ходов — правило игры, а не пожелание, но партия важнее
         порядка: если модель упёрлась, берём что дала, а не роняем игру.
         """
-        text = guess.prompt(game, card.title, answer)
+        text = guess.prompt(game, card.title, answer, about)
         want = guess.mode(game)
         off_order = None
         last = ""

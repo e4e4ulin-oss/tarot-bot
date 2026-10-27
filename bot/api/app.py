@@ -1525,6 +1525,19 @@ def game_payload(game: guess_rules.Game, settings: Settings) -> dict[str, Any]:
     }
 
 
+async def guess_about(repo: Repo, user_id: int) -> str:
+    """Круг игрока для подсказки: возраст и город, если он их указал.
+
+    Данные уже лежат ради натальной карты — спрашивать их ещё раз незачем.
+    """
+    user = await repo.get_user(user_id)
+    if user is None:
+        return ""
+    return guess_rules.audience(
+        age=guess_rules.years(user.birth_date), city=user.city or user.birth_city
+    )
+
+
 async def guess_offer(repo: Repo, settings: Settings, user_id: int) -> dict[str, Any]:
     """Условия, на которых можно начать: бесплатно, за звёзды или никак."""
     played = await repo.count_games(user_id)
@@ -1589,11 +1602,13 @@ async def handle_guess_start(request: web.Request) -> web.Response:
             return json_error("Партия оплачивается отдельно", 402, "needs_payment")
 
         game = guess_rules.Game()
+        about = await guess_about(repo, identity.user.id)
         try:
             turn = await guessing.step(
                 game,
                 allow_reversed=settings.allow_reversed,
                 reversed_chance=settings.reversed_chance,
+                about=about,
             )
         except (GrokError, TimeoutError) as exc:
             logger.warning("Партия не началась: %s", exc)
@@ -1651,6 +1666,7 @@ async def handle_guess_answer(request: web.Request) -> web.Response:
                 game,
                 allow_reversed=settings.allow_reversed,
                 reversed_chance=settings.reversed_chance,
+                about=await guess_about(repo, identity.user.id),
             )
         except (GrokError, TimeoutError) as exc:
             # Оценку сохраняем всё равно: она уже дана, и терять её нельзя

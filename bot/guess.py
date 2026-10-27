@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from datetime import date
 from random import Random
 
 from .tarot.draw import DrawnCard, card_polarity, draw_spread
@@ -376,6 +377,35 @@ def parse(raw: str) -> Step | None:
     return Step(question=question, names=names[:MAX_NAMES], reading=reading)
 
 
+def years(birth_date: date | None, today: date | None = None) -> int | None:
+    """Полных лет. День рождения в этом году ещё не наступил — годом меньше."""
+    if birth_date is None:
+        return None
+    today = today or date.today()
+    age = today.year - birth_date.year
+    if (today.month, today.day) < (birth_date.month, birth_date.day):
+        age -= 1
+    return age if 0 <= age < 130 else None
+
+
+def audience(*, age: int | None, city: str | None = None) -> str:
+    """Кого этот человек скорее держит в голове.
+
+    Загадывают из своего круга: ровесников, свою страну, своё поколение.
+    Пятидесятилетний из России думает о Цое, а не о Кендрике Ламаре — и
+    знание об этом сокращает партию на несколько вопросов.
+
+    Это подсказка о вероятном, а не запрет: правильный ответ может оказаться
+    каким угодно, и отбрасывать его за «нетипичность» нельзя.
+    """
+    parts = []
+    if age is not None:
+        parts.append(f"{age} лет")
+    if city:
+        parts.append(f"живёт: {city}")
+    return ", ".join(parts)
+
+
 def options(turn: Turn) -> tuple[str, ...]:
     """Что человеку можно нажать на этом ходу.
 
@@ -481,9 +511,17 @@ SYSTEM = (
 )
 
 
-def prompt(game: Game, card: str, card_answer: str) -> str:
+def prompt(game: Game, card: str, card_answer: str, about: str = "") -> str:
     """Что модель видит перед ходом."""
     parts = []
+
+    if about:
+        parts.append(
+            f"Загадывает человек: {about}. Люди берут имена из своего круга — "
+            "ровесников, своей страны, своего поколения. Учитывай это, выбирая "
+            "вопросы и кого называть. Но это лишь вероятное: если факты ведут "
+            "в другую сторону, иди за фактами."
+        )
 
     known = facts(game)
     if known:

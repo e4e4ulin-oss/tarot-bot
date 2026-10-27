@@ -11,7 +11,7 @@ import pytest_asyncio
 from aiohttp.test_utils import TestClient, TestServer
 
 from bot import guess
-from bot.api.app import SESSIONS, create_app
+from bot.api.app import create_app
 from bot.config import Settings
 from bot.db import Repo, create_engine, create_session_factory, init_models
 from bot.services.grok import GrokError
@@ -256,7 +256,7 @@ async def test_the_party_has_its_own_invoice(make_client):
     """Счёт за партию — отдельный товар: оплата расклада её не открывает."""
     from bot import billing
 
-    client = await make_client(FakeGuessing())
+    await make_client(FakeGuessing())
     settings = Settings()
     deal = billing.terms(settings, billing.PAYLOAD_GUESS)
 
