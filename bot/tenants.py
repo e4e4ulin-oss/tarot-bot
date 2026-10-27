@@ -32,6 +32,8 @@ def overrides(tenant: Tenant) -> dict[str, object]:
         "author_price_full": tenant.price_full,
         "free_auto_readings": tenant.free_auto_readings,
         "free_needs_daily": tenant.free_needs_daily,
+        "free_without_daily": tenant.free_without_daily,
+        "free_daily_limit": tenant.free_daily_limit,
         "auto_reading_price": tenant.auto_reading_price,
         "natal_reading_price": tenant.natal_reading_price,
         "payment_provider_token": tenant.payment_provider_token,

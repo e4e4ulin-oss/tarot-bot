@@ -8,9 +8,10 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from .. import analytics, texts
+from ..access import check as check_access
 from ..config import Settings
 from ..db import Repo
-from ..keyboards import daily_card_menu
+from ..keyboards import daily_card_menu, daily_off_menu
 from ..schedule import now
 from ..services.daily import card_message, card_of_the_day
 from .auto import send_card_images
@@ -62,16 +63,42 @@ async def cmd_daily(message: Message, state: FSMContext, repo: Repo, settings: S
     await show_card(message, message.from_user.id, repo, settings)
 
 
-@router.callback_query(F.data.in_({"daily:on", "daily:off"}))
+@router.callback_query(F.data == "daily:off")
+async def cb_unsubscribe_warning(call: CallbackQuery, repo: Repo, settings: Settings) -> None:
+    """Говорит, чего человек лишится, и только потом отключает.
+
+    Потраченное не возвращается, поэтому отключение на третьем раскладе
+    оставляет ни с чем. Узнавать об этом постфактум — обидно и несправедливо.
+    """
+    access = await check_access(repo, settings, call.from_user.id)
+    if isinstance(call.message, Message):
+        await call.message.answer(
+            texts.DAILY_OFF_WARNING.format(
+                total=settings.free_auto_readings,
+                without=settings.free_without_daily,
+                left=access.free_left,
+                after=access.without_daily,
+            ),
+            reply_markup=daily_off_menu(),
+        )
+    await call.answer()
+
+
+@router.callback_query(F.data.in_({"daily:on", "daily:off:yes"}))
 async def cb_subscription(call: CallbackQuery, repo: Repo, settings: Settings) -> None:
     subscribe = call.data == "daily:on"
     await repo.set_daily_subscription(call.from_user.id, subscribe)
 
     if subscribe:
         await repo.log_event(call.from_user.id, analytics.DAILY_SUBSCRIBED)
+        access = await check_access(repo, settings, call.from_user.id)
         answer = texts.DAILY_SUBSCRIBED.format(
             hour=settings.daily_card_hour, tz=settings.work_timezone_label
         )
+        if access.free_left:
+            answer += "\n\n" + texts.DAILY_ON_AGAIN.format(
+                left=access.free_left, limit=settings.free_daily_limit
+            )
     else:
         answer = texts.DAILY_UNSUBSCRIBED
 

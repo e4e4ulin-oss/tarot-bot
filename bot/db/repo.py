@@ -99,7 +99,14 @@ class Repo:
         return {"count": int(count), "total": int(total)}
 
     # --- Пользователи ---------------------------------------------------
-    async def upsert_user(self, user_id: int, username: str | None, first_name: str | None) -> User:
+    async def upsert_user(
+        self,
+        user_id: int,
+        username: str | None,
+        first_name: str | None,
+        *,
+        subscribe_new: bool = False,
+    ) -> User:
         user = await self.session.get(User, (self.tenant_id, user_id))
         if user is None:
             user = User(
@@ -107,6 +114,9 @@ class Repo:
                 id=user_id,
                 username=username,
                 first_name=first_name,
+                # Карта дня включается сразу: она открывает бесплатные расклады,
+                # и человек, не знающий об условии, выглядит как отказавшийся
+                daily_subscribed=subscribe_new,
             )
             self.session.add(user)
         else:

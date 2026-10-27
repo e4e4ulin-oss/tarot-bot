@@ -895,8 +895,16 @@ async def test_subscription_turns_on_and_off(env):
         assert await Repo(db).is_daily_subscribed(chat) is True
     assert any("каждое утро" in text for text in session.texts())
 
+    # Отключение сначала объясняет цену: потраченное не возвращается
     session.clear()
     await feed(dp, bot, make_callback("daily:off", chat_id=chat), 3)
+    async with factory() as db:
+        assert await Repo(db).is_daily_subscribed(chat) is True, "отключили без спроса"
+    warned = "\n".join(session.texts())
+    assert "Отключить карту дня?" in warned
+
+    session.clear()
+    await feed(dp, bot, make_callback("daily:off:yes", chat_id=chat), 4)
     async with factory() as db:
         assert await Repo(db).is_daily_subscribed(chat) is False
     assert any("Больше не присылаю" in text for text in session.texts())

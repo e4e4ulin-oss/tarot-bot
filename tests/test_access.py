@@ -35,13 +35,54 @@ async def make_reading(repo: Repo, user_id: int = USER) -> None:
 
 
 @pytest.mark.asyncio
-async def test_subscription_is_required_for_free_readings(repo):
-    settings = make_settings(FREE_AUTO_READINGS=3)
-    assert (await check(repo, settings, USER)).reason == "needs_daily"
+async def test_the_subscription_decides_how_many_are_free(repo):
+    """Подписан — пять, без подписки — два. Это не запрет, а длина полосы."""
+    settings = make_settings(FREE_AUTO_READINGS=5, FREE_WITHOUT_DAILY=2)
+
+    without = await check(repo, settings, USER)
+    assert without.allowed and without.reason == "free" and without.free_left == 2
 
     await repo.set_daily_subscription(USER, True)
     access = await check(repo, settings, USER)
-    assert access.allowed and access.reason == "free" and access.free_left == 3
+    assert access.allowed and access.free_left == 5
+
+
+@pytest.mark.asyncio
+async def test_what_is_spent_does_not_come_back_with_the_subscription(repo):
+    """Отписался на третьем раскладе — остался ни с чем; вернулся — остаток цел.
+
+    Считается от текущей подписки, а потраченное вычитается: никакого
+    отдельного кошелька, который можно было бы обнулить или восстановить.
+    """
+    settings = make_settings(FREE_AUTO_READINGS=5, FREE_WITHOUT_DAILY=2)
+    await repo.set_daily_subscription(USER, True)
+    for _ in range(3):
+        await make_reading(repo)
+
+    assert (await check(repo, settings, USER)).free_left == 2
+
+    await repo.set_daily_subscription(USER, False)
+    gone = await check(repo, settings, USER)
+    assert not gone.allowed and gone.reason == "needs_payment" and gone.free_left == 0
+
+    await repo.set_daily_subscription(USER, True)
+    assert (await check(repo, settings, USER)).free_left == 2
+
+
+@pytest.mark.asyncio
+async def test_the_warning_knows_what_is_at_stake(repo):
+    """Перед отключением человеку говорят, сколько он потеряет."""
+    settings = make_settings(FREE_AUTO_READINGS=5, FREE_WITHOUT_DAILY=2)
+    await repo.set_daily_subscription(USER, True)
+    await make_reading(repo)
+
+    access = await check(repo, settings, USER)
+    assert access.free_left == 4  # сейчас
+    assert access.without_daily == 1  # останется, если отключить
+
+    await make_reading(repo)
+    await make_reading(repo)
+    assert (await check(repo, settings, USER)).without_daily == 0
 
 
 @pytest.mark.asyncio

@@ -51,6 +51,15 @@ def history_menu(items: Sequence[tuple[int, str]]) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def daily_off_menu() -> InlineKeyboardMarkup:
+    """Отключение карты дня укорачивает бесплатную полосу — спрашиваем."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Всё равно отключить", callback_data="daily:off:yes")
+    builder.button(text="Оставить карту дня", callback_data="daily:open")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 def invite_menu() -> InlineKeyboardMarkup:
     """Ссылку удобнее переслать, а не копировать руками."""
     builder = InlineKeyboardBuilder()

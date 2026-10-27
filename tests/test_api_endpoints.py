@@ -43,8 +43,10 @@ def auth(token: str = TOKEN, **kwargs) -> dict[str, str]:
 
 
 async def subscribe(client, user_id: int) -> None:
-    """Бесплатные расклады положены подписчикам утренней карты — это правило бота."""
-    await client.post("/api/daily/subscription", headers=auth(user_id=user_id))
+    """Подписка включается сама при первом приходе; здесь только убеждаемся."""
+    me = await (await client.get("/api/me", headers=auth(user_id=user_id))).json()
+    if not me["daily_subscribed"]:
+        await client.post("/api/daily/subscription", headers=auth(user_id=user_id))
 
 
 @pytest.mark.asyncio
@@ -119,10 +121,14 @@ async def test_daily_cards_differ_between_people(client):
 
 @pytest.mark.asyncio
 async def test_subscription_toggles(client):
-    on = await (await client.post("/api/daily/subscription", headers=auth(user_id=9))).json()
-    assert on["subscribed"] is True
+    """Новичок приходит уже подписанным: карта дня открывает бесплатные расклады."""
+    me = await (await client.get("/api/me", headers=auth(user_id=9))).json()
+    assert me["daily_subscribed"] is True
+
     off = await (await client.post("/api/daily/subscription", headers=auth(user_id=9))).json()
     assert off["subscribed"] is False
+    on = await (await client.post("/api/daily/subscription", headers=auth(user_id=9))).json()
+    assert on["subscribed"] is True
 
 
 @pytest.mark.asyncio
@@ -170,8 +176,8 @@ async def test_reading_finish_writes_interpretation_and_history(client):
     assert res.status == 200
     done = await res.json()
     assert done["text"]
-    # Бесплатных стало меньше ровно на этот расклад
-    assert done["free_left"] == 2
+    # Бесплатных стало меньше ровно на этот расклад: было пять
+    assert done["free_left"] == 4
 
     me = await (await client.get("/api/me", headers=auth(user_id=23))).json()
     assert len(me["history"]) == 1
@@ -207,9 +213,10 @@ async def test_yes_no_spread_demands_a_question(client):
 
 
 @pytest.mark.asyncio
-async def test_free_readings_run_out(client):
+async def test_two_free_readings_a_day_and_no_more(client):
+    """Пять бесплатных — это три дня, а не один вечер."""
     await subscribe(client, 28)
-    for _ in range(3):
+    for _ in range(2):
         started = await (
             await client.post(
                 "/api/reading", headers=auth(user_id=28), json={"spread": "day", "number": 2}
@@ -227,7 +234,9 @@ async def test_free_readings_run_out(client):
     ).json()
     # Отказ приходит обычным ответом: приложению надо показать, чего не хватает
     assert refused["allowed"] is False
-    assert refused["reason"] in ("needs_payment", "payment_not_ready", "needs_daily")
+    assert refused["reason"] == "free_daily_limit"
+    # И бесплатные при этом не потеряны — они просто завтра
+    assert refused["free_left"] == 3
 
 
 @pytest.mark.asyncio

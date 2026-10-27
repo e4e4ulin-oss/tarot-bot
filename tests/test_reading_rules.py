@@ -41,22 +41,62 @@ async def ask(repo: Repo, settings: Settings, *, number: int = 7, question: str 
 
 
 @pytest.mark.asyncio
-async def test_without_a_subscription_the_cards_are_not_drawn(repo):
-    decision = await ask(repo, make_settings(FREE_AUTO_READINGS=3))
+async def test_without_a_subscription_there_are_fewer_free_readings(repo):
+    """Не запрет, а короткая полоса: два расклада вместо пяти."""
+    settings = make_settings(FREE_AUTO_READINGS=5, FREE_WITHOUT_DAILY=2)
 
-    assert isinstance(decision, reading.Refused)
-    assert decision.reason == "needs_daily"
+    decision = await ask(repo, settings)
+
+    assert isinstance(decision, reading.Started)
+    assert decision.access.free_left == 2
 
 
 @pytest.mark.asyncio
 async def test_a_subscriber_gets_the_whole_spread(repo):
     await repo.set_daily_subscription(USER, True)
 
-    decision = await ask(repo, make_settings(FREE_AUTO_READINGS=3))
+    decision = await ask(repo, make_settings(FREE_AUTO_READINGS=5))
 
     assert isinstance(decision, reading.Started)
     assert len(decision.drawn) == SPREAD.size
     assert decision.access.reason == "free"
+    assert decision.access.free_left == 5
+
+
+@pytest.mark.asyncio
+async def test_two_free_a_day_and_the_rest_tomorrow(repo):
+    """Потолок считает только бесплатные и не отнимает их — переносит."""
+    settings = make_settings(FREE_AUTO_READINGS=5, FREE_DAILY_LIMIT=2)
+    await repo.set_daily_subscription(USER, True)
+
+    for _ in range(2):
+        assert isinstance(await ask(repo, settings), reading.Started)
+        await repo.save_reading(
+            user_id=USER, spread_key="ptf", question=None, cards=[],
+            interpretation="", ai_used=False,
+        )
+
+    stopped = await ask(repo, settings)
+    assert isinstance(stopped, reading.Refused)
+    assert stopped.reason == "free_daily_limit"
+    assert stopped.free_left == 3  # три ждут завтрашнего дня
+
+
+@pytest.mark.asyncio
+async def test_the_one_who_paid_hits_no_ceiling(repo):
+    """Заплатил — раскладывает сколько нужно: потолок придуман для бесплатных."""
+    settings = make_settings(FREE_AUTO_READINGS=0, FREE_DAILY_LIMIT=2)
+    for _ in range(3):
+        await repo.save_reading(
+            user_id=USER, spread_key="ptf", question=None, cards=[],
+            interpretation="", ai_used=False,
+        )
+    await repo.add_payment(USER, 369, "RUB", "charge-1")
+
+    decision = await ask(repo, settings)
+
+    assert isinstance(decision, reading.Started)
+    assert decision.access.reason == "paid"
 
 
 @pytest.mark.asyncio

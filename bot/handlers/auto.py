@@ -182,6 +182,17 @@ async def refuse(message: Message, settings: Settings, decision: reading.Refused
         await message.answer(texts.NEEDS_DAILY, reply_markup=subscribe_menu())
     elif decision.reason == "payment_not_ready":
         await message.answer(texts.PAYMENT_NOT_READY.format(author=settings.author_name))
+    elif decision.reason == "free_daily_limit":
+        # Бесплатные не потеряны, а перенесены: об этом и говорим
+        await message.answer(
+            texts.FREE_DAILY_LIMIT.format(
+                limit=decision.limit,
+                left=decision.free_left,
+                price=settings.auto_reading_price,
+                currency=settings.author_currency,
+            ),
+            reply_markup=paywall_menu(settings.auto_reading_price, settings.author_currency),
+        )
     elif decision.reason == "daily_limit":
         await message.answer(
             texts.DAILY_LIMIT.format(limit=decision.limit, author=settings.author_name),

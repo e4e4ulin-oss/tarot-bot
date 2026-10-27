@@ -183,6 +183,8 @@ async def handle_config(request: web.Request) -> web.Response:
             "natal_price": settings.natal_reading_price,
             "free_readings": settings.free_auto_readings,
             "free_needs_daily": settings.free_needs_daily,
+            "free_without_daily": settings.free_without_daily,
+            "free_per_day": settings.free_daily_limit,
         }
     )
 
@@ -200,7 +202,10 @@ async def handle_me(request: web.Request) -> web.Response:
     async with session_factory() as session:
         repo = Repo(session, tenant_id=identity.tenant_id)
         user = await repo.upsert_user(
-            identity.user.id, identity.user.username, identity.user.first_name
+            identity.user.id,
+            identity.user.username,
+            identity.user.first_name,
+            subscribe_new=settings.daily_subscribe_new,
         )
         used = await repo.count_auto_readings(identity.user.id)
         subscribed = await repo.is_daily_subscribed(identity.user.id)
@@ -208,9 +213,10 @@ async def handle_me(request: web.Request) -> web.Response:
         order = await repo.open_order_for_user(identity.user.id)
         # Остаток спрашиваем у правил доступа: у человека могут быть расклады
         # за приглашённых друзей и за промокоды, и своя арифметика их потеряет
-        left = (await check_access(repo, settings, identity.user.id)).free_left
+        access = await check_access(repo, settings, identity.user.id)
+        left = access.free_left
 
-    granted = settings.free_auto_readings + (user.bonus_readings or 0)
+    granted = access.granted
     return json_ok(
         {
             "user": {
@@ -233,6 +239,10 @@ async def handle_me(request: web.Request) -> web.Response:
                 "free_left": left,
                 "free_limit": granted,
                 "bonus": user.bonus_readings or 0,
+                # Сколько останется, если отключить карту дня: об этом человека
+                # предупреждают до отключения, а не после
+                "without_daily": access.without_daily,
+                "per_day": settings.free_daily_limit,
                 "needs_daily": settings.free_needs_daily and not subscribed,
             },
             "history": [
@@ -303,7 +313,12 @@ async def handle_daily_draw(request: web.Request) -> web.Response:
     day = now(settings).date()
     async with session_factory() as session:
         repo = Repo(session, tenant_id=identity.tenant_id)
-        await repo.upsert_user(identity.user.id, identity.user.username, identity.user.first_name)
+        await repo.upsert_user(
+            identity.user.id,
+            identity.user.username,
+            identity.user.first_name,
+            subscribe_new=settings.daily_subscribe_new,
+        )
         drawn = await card_of_the_day(repo, settings, identity.user.id, day)
         subscribed = await repo.is_daily_subscribed(identity.user.id)
         await repo.log_event(identity.user.id, analytics.DAILY_OPEN)
@@ -314,13 +329,19 @@ async def handle_daily_draw(request: web.Request) -> web.Response:
 async def handle_daily_subscription(request: web.Request) -> web.Response:
     """Переключатель утренней рассылки: состояние возвращаем новое."""
     identity: Identity = request[IDENTITY]
+    settings: Settings = request[BRAND]
     session_factory = request.app[SESSIONS]
 
     async with session_factory() as session:
         repo = Repo(session, tenant_id=identity.tenant_id)
         # В боте пользователя заводит middleware, здесь его может ещё не быть:
         # подписаться можно первым же действием, не открыв больше ничего
-        await repo.upsert_user(identity.user.id, identity.user.username, identity.user.first_name)
+        await repo.upsert_user(
+            identity.user.id,
+            identity.user.username,
+            identity.user.first_name,
+            subscribe_new=settings.daily_subscribe_new,
+        )
         subscribed = await repo.is_daily_subscribed(identity.user.id)
         await repo.set_daily_subscription(identity.user.id, not subscribed)
         if not subscribed:
@@ -353,6 +374,7 @@ async def handle_cities(request: web.Request) -> web.Response:
 async def handle_profile_save(request: web.Request) -> web.Response:
     """Данные рождения. Всё необязательно: сколько открыли, настолько и подробнее разбор."""
     identity: Identity = request[IDENTITY]
+    settings: Settings = request[BRAND]
     session_factory = request.app[SESSIONS]
 
     try:
@@ -409,7 +431,12 @@ async def handle_profile_save(request: web.Request) -> web.Response:
 
     async with session_factory() as session:
         repo = Repo(session, tenant_id=identity.tenant_id)
-        await repo.upsert_user(identity.user.id, identity.user.username, identity.user.first_name)
+        await repo.upsert_user(
+            identity.user.id,
+            identity.user.username,
+            identity.user.first_name,
+            subscribe_new=settings.daily_subscribe_new,
+        )
         if fields:
             await repo.save_profile(identity.user.id, **fields)
         user = await repo.get_user(identity.user.id)
@@ -617,7 +644,12 @@ async def handle_order_create(request: web.Request) -> web.Response:
 
     async with session_factory() as session:
         repo = Repo(session, tenant_id=identity.tenant_id)
-        await repo.upsert_user(identity.user.id, identity.user.username, identity.user.first_name)
+        await repo.upsert_user(
+            identity.user.id,
+            identity.user.username,
+            identity.user.first_name,
+            subscribe_new=settings.daily_subscribe_new,
+        )
 
         existing = await repo.open_order_for_user(identity.user.id)
         if existing is not None:
@@ -1317,7 +1349,12 @@ async def handle_reading_start(request: web.Request) -> web.Response:
 
     async with session_factory() as session:
         repo = Repo(session, tenant_id=identity.tenant_id)
-        await repo.upsert_user(identity.user.id, identity.user.username, identity.user.first_name)
+        await repo.upsert_user(
+            identity.user.id,
+            identity.user.username,
+            identity.user.first_name,
+            subscribe_new=settings.daily_subscribe_new,
+        )
         await repo.log_event(identity.user.id, analytics.AUTO_OPEN)
         decision = await reading_rules.start(
             repo, settings, identity.user.id, spread, question, number=number

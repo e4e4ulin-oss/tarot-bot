@@ -35,9 +35,18 @@ class Settings(BaseSettings):
 
     # --- Доступ к авто-раскладам ---
     # Сколько раскладов человек получает бесплатно за всё время. 0 — платно сразу.
-    free_auto_readings: int = Field(default=3, alias="FREE_AUTO_READINGS")
+    free_auto_readings: int = Field(default=5, alias="FREE_AUTO_READINGS")
     # Бесплатные расклады даются подписанным на карту дня: подписка тоже бесплатна
     free_needs_daily: bool = Field(default=True, alias="FREE_NEEDS_DAILY")
+    # Сколько бесплатных остаётся тому, кто отключил карту дня. Потраченное
+    # не возвращается: отписавшийся на третьем раскладе остаётся ни с чем
+    free_without_daily: int = Field(default=2, alias="FREE_WITHOUT_DAILY")
+    # Сколько бесплатных можно потратить за сутки. Только бесплатных:
+    # оплативший не должен упираться ни во что
+    free_daily_limit: int = Field(default=2, alias="FREE_DAILY_LIMIT")
+    # Карта дня включается сама при первом приходе — она же открывает
+    # бесплатные расклады, и человеку об этом говорят сразу
+    daily_subscribe_new: bool = Field(default=True, alias="DAILY_SUBSCRIBE_NEW")
     # Цена одного расклада после того, как бесплатные кончились
     auto_reading_price: int = Field(default=369, alias="AUTO_READING_PRICE")
     # Подробный разбор натальной карты: пишется один раз и надолго,
@@ -150,6 +159,9 @@ class Settings(BaseSettings):
         "admin_chat_id",
         "allow_reversed",
         "daily_auto_limit",
+        "free_without_daily",
+        "free_daily_limit",
+        "daily_subscribe_new",
         "grok_deadline",
         "grok_max_tokens",
         "grok_retries",

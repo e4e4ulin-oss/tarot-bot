@@ -333,8 +333,11 @@ class Tenant(Base):
     price_base: Mapped[int] = mapped_column(Integer, default=700)
     price_full: Mapped[int] = mapped_column(Integer, default=1000)
 
-    free_auto_readings: Mapped[int] = mapped_column(Integer, default=3)
+    free_auto_readings: Mapped[int] = mapped_column(Integer, default=5)
     free_needs_daily: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Сколько бесплатных остаётся без подписки и сколько можно за сутки
+    free_without_daily: Mapped[int] = mapped_column(Integer, default=2, server_default="2")
+    free_daily_limit: Mapped[int] = mapped_column(Integer, default=2, server_default="2")
     auto_reading_price: Mapped[int] = mapped_column(Integer, default=369)
     natal_reading_price: Mapped[int] = mapped_column(Integer, default=990)
     # Деньги идут на счёт арендатора, поэтому и токен провайдера его

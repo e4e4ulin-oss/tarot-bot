@@ -173,7 +173,7 @@
               <img src="assets/empty-card.webp" alt="">
               <p>Карта на сегодня ещё не вытянута.</p>
             </div>
-            <button class="btn" id="daily-draw">Вытянуть карту</button>${offerFree(data.subscribed)}`;
+            <button class="btn" id="daily-draw">Вытянуть карту</button>`;
           $("#daily-draw").addEventListener("click", async (event) => {
             event.target.disabled = true;
             tap("medium");
@@ -187,7 +187,9 @@
           });
           return;
         }
-        body.innerHTML = offerFree(data.subscribed) + dailyCard(data.card, data.subscribed);
+        const me = await api("me").catch(() => null);
+        const left = me ? me.readings.free_left : 0;
+        body.innerHTML = offerFree(data.subscribed, left) + dailyCard(data.card, data.subscribed);
         bindSubscribe();
       } catch (err) {
         if (err.status === 404) {
@@ -1209,6 +1211,14 @@
         body: "Бесплатные расклады закончились, а приём оплаты автор ещё не настроил. Напишите ему напрямую.",
         action: null,
       },
+      free_daily_limit: {
+        // Бесплатные не сгорели, а ждут завтрашнего дня — это главное, что
+        // человек должен понять, упёршись в потолок
+        title: "На сегодня хватит",
+        body: `Бесплатных раскладов не больше ${data.limit} в день. Оставшиеся ${data.free_left} никуда не денутся — они снова ваши завтра.`,
+        action: "Разложить сейчас — платно",
+        pay: true,
+      },
       daily_limit: {
         title: "На сегодня хватит",
         body: `Больше ${data.limit} раскладов в день не делаем: карты любят паузу.`,
@@ -1520,14 +1530,28 @@
   /* Условие бесплатных раскладов человек должен прочитать до того, как
      упрётся в него на полпути к раскладу. Поэтому оно стоит на первом экране,
      пока подписки нет, и исчезает, как только она появилась. */
-  function offerFree(subscribed) {
-    if (subscribed || !config || !config.free_needs_daily || !config.free_readings) return "";
+  function offerFree(subscribed, left) {
+    if (!config || !config.free_needs_daily || !config.free_readings) return "";
     const n = config.free_readings;
+    const perDay = config.free_per_day;
+
+    if (!subscribed) {
+      const few = config.free_without_daily;
+      return `
+        <div class="card offer">
+          <h3>${n} ${plural(n, "бесплатный расклад", "бесплатных расклада", "бесплатных раскладов")} — за карту дня</h3>
+          <p>Сейчас без подписки их ${few}. Включите утреннюю карту — и откроются все ${n}:
+             потраченное при этом не возвращается, а остаток остаётся вашим.</p>
+        </div>`;
+    }
+    // Подписанному показываем, чем он владеет, пока бесплатные не кончились
+    if (!left) return "";
     return `
       <div class="card offer">
-        <h3>${n} ${plural(n, "бесплатный расклад", "бесплатных расклада", "бесплатных раскладов")} — за подписку</h3>
-        <p>Включите утреннюю карту дня — и они откроются сразу.
-           Одна карта в день, отключить можно в любой момент.</p>
+        <h3>Бесплатных раскладов: ${left}</h3>
+        <p>Карта дня включена — она их и открывает.${
+          perDay ? ` Тратить можно по ${perDay} в день, остальные подождут.` : ""
+        }</p>
       </div>`;
   }
 
@@ -1542,7 +1566,7 @@
         ${card.keywords && card.keywords.length ? `<p class="note">${esc(card.keywords.join(" · "))}</p>` : ""}
       </div>
       ${card.advice ? `<div class="card"><h3>Совет</h3><p>${esc(card.advice)}</p></div>` : ""}
-      <button class="btn ghost" id="daily-sub">
+      <button class="btn ghost" id="daily-sub" data-on="${subscribed ? 1 : 0}">
         ${subscribed ? "Отключить утреннюю карту" : "Присылать карту по утрам"}
       </button>`;
   }
@@ -1551,19 +1575,52 @@
     const btn = $("#daily-sub");
     if (!btn) return;
     btn.addEventListener("click", async () => {
+      // Отключение укорачивает бесплатную полосу, и потраченное не вернётся.
+      // Узнать об этом постфактум — обидно, поэтому спрашиваем заранее
+      if (btn.dataset.on === "1" && !(await confirmOff())) return;
+
       btn.disabled = true;
       tap();
       try {
         const res = await api("daily/subscription", { method: "POST" });
+        btn.dataset.on = res.subscribed ? "1" : "0";
         btn.textContent = res.subscribed
           ? "Отключить утреннюю карту"
           : "Присылать карту по утрам";
+        loaded.delete("profile");
+        render.daily();
       } catch (err) {
         btn.textContent = "Не получилось, попробуйте позже";
       } finally {
         btn.disabled = false;
       }
     });
+  }
+
+  async function confirmOff() {
+    let left = null;
+    let after = null;
+    try {
+      const me = await api("me");
+      left = me.readings.free_left;
+      after = me.readings.without_daily;
+    } catch (err) {
+      // Чисел нет — спросим без них, но спросить всё равно надо
+    }
+    const total = config ? config.free_readings : null;
+    const without = config ? config.free_without_daily : null;
+    const lines = [
+      total && without
+        ? `Карта дня открывает ${total} бесплатных раскладов. Без неё их ${without}, а потраченное не возвращается.`
+        : "Без карты дня бесплатных раскладов становится меньше, а потраченное не возвращается.",
+      left === null ? "" : `Сейчас у вас ${left}. Если отключить, останется ${after}.`,
+      "Отключить?",
+    ].filter(Boolean);
+
+    if (tg && tg.showConfirm) {
+      return await new Promise((resolve) => tg.showConfirm(lines.join("\n\n"), resolve));
+    }
+    return window.confirm(lines.join("\n\n"));
   }
 
   async function loadConfig() {

@@ -84,6 +84,13 @@ async def start(
         if used >= settings.daily_auto_limit:
             return Refused("daily_limit", access.free_left, settings.daily_auto_limit)
 
+    # Потолок на бесплатные: пять раскладов — это три дня, а не один вечер.
+    # Оплативший в него не упирается: заплатил — раскладывай сколько нужно
+    if access.reason == "free" and settings.free_daily_limit > 0:
+        today = await repo.count_readings_today(user_id)
+        if today >= settings.free_daily_limit:
+            return Refused("free_daily_limit", access.free_left, settings.free_daily_limit)
+
     # Карты ложатся под названное число, а не под случайность сервера:
     # тот же человек с тем же числом в ту же минуту получит тот же расклад
     drawn = draw_spread(

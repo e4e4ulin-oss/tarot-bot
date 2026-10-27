@@ -3,6 +3,8 @@
 import pytest
 import pytest_asyncio
 
+from sqlalchemy import select
+
 from bot.config import Settings
 from bot.db import Tenant
 from bot.db.session import create_engine, create_session_factory, init_models
@@ -161,3 +163,42 @@ async def test_overview_counts_each_brand_separately(factory):
     assert overview["second"]["users"] == 1
     assert overview["default"]["paid"] == 0
     assert overview["second"]["paid"] == 1 and overview["second"]["total"] == 369
+
+
+@pytest.mark.asyncio
+async def test_a_rule_can_be_changed_without_sql(tmp_path, monkeypatch):
+    """Цены и правила живут в базе; менять их в консоли безопаснее, чем SQL."""
+    from argparse import Namespace
+
+    from bot.cli import EDITABLE, edit
+
+    db = tmp_path / "cli.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db}")
+    monkeypatch.setenv("BOT_TOKEN", "100:abc")
+    from bot.config import get_settings
+
+    get_settings.cache_clear()
+
+    engine = create_engine(f"sqlite+aiosqlite:///{db}")
+    await init_models(engine)
+    factory = create_session_factory(engine)
+    async with factory() as session:
+        session.add(
+            Tenant(slug="origin", title="Свой", bot_token="100:abc", bot_id=100)
+        )
+        await session.commit()
+    await engine.dispose()
+
+    assert await edit(Namespace(slug="origin", field="free_auto_readings", value="5")) == 0
+
+    engine = create_engine(f"sqlite+aiosqlite:///{db}")
+    factory = create_session_factory(engine)
+    async with factory() as session:
+        tenant = await session.scalar(select(Tenant).where(Tenant.slug == "origin"))
+        assert tenant.free_auto_readings == 5
+    await engine.dispose()
+
+    # Токен бота подменить этой командой нельзя
+    assert "bot_token" not in EDITABLE
+    assert await edit(Namespace(slug="origin", field="bot_token", value="999:x")) == 2
+    get_settings.cache_clear()

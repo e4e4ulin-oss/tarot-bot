@@ -8,6 +8,10 @@
 
     python -m bot.cli list
     python -m bot.cli disable --slug nadezhda
+
+Цены и правила меняются там же, по одному полю за раз:
+
+    python -m bot.cli set --slug origin --field free_auto_readings --value 5
 """
 
 from __future__ import annotations
@@ -95,6 +99,60 @@ async def switch(args: argparse.Namespace, active: bool) -> int:
     return 0
 
 
+# Что разрешено менять этой командой: только правила и цены. Токен и bot_id
+# сюда не входят — подменить бота арендатора одной строкой быть не должно
+EDITABLE: dict[str, type] = {
+    "title": str,
+    "author_name": str,
+    "currency": str,
+    "admin_chat_id": int,
+    "price_short": int,
+    "price_base": int,
+    "price_full": int,
+    "auto_reading_price": int,
+    "natal_reading_price": int,
+    "free_auto_readings": int,
+    "free_without_daily": int,
+    "free_daily_limit": int,
+    "free_needs_daily": bool,
+    "payment_provider_token": str,
+    "miniapp_url": str,
+}
+
+
+def _cast(kind: type, raw: str) -> object:
+    if kind is bool:
+        return raw.strip().lower() in {"1", "true", "да", "yes", "on"}
+    return kind(raw)
+
+
+async def edit(args: argparse.Namespace) -> int:
+    """Меняет одно поле арендатора. Бот подхватит значение при перезапуске."""
+    if args.field not in EDITABLE:
+        print(f"Менять можно: {', '.join(sorted(EDITABLE))}")
+        return 2
+
+    settings = get_settings()
+    engine = create_engine(settings.database_url)
+    await init_models(engine)
+    factory = create_session_factory(engine)
+
+    async with factory() as session:
+        tenant = await session.scalar(select(Tenant).where(Tenant.slug == args.slug))
+        if tenant is None:
+            print(f"Нет арендатора «{args.slug}»")
+            return 1
+
+        was = getattr(tenant, args.field)
+        setattr(tenant, args.field, _cast(EDITABLE[args.field], args.value))
+        await session.commit()
+        print(f"{args.slug}: {args.field} {was} → {getattr(tenant, args.field)}")
+
+    await engine.dispose()
+    print("Перезапустите бота, чтобы значение вступило в силу: systemctl restart tarot-bot")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Арендаторы сервиса")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -110,11 +168,16 @@ def build_parser() -> argparse.ArgumentParser:
     new.add_argument("--price-base", type=int, default=700)
     new.add_argument("--price-full", type=int, default=1000)
     new.add_argument("--auto-price", type=int, default=369)
-    new.add_argument("--free", type=int, default=3, help="бесплатных раскладов")
+    new.add_argument("--free", type=int, default=5, help="бесплатных раскладов")
     new.add_argument("--provider-token", default="", help="платёжный провайдер франчайзи")
     new.add_argument("--miniapp-url", default="", help="адрес его мини-приложения")
 
     commands.add_parser("list", help="показать арендаторов")
+
+    change = commands.add_parser("set", help="изменить цену или правило")
+    change.add_argument("--slug", required=True)
+    change.add_argument("--field", required=True, help=f"одно из: {', '.join(sorted(EDITABLE))}")
+    change.add_argument("--value", required=True)
 
     off = commands.add_parser("disable", help="выключить бота франчайзи")
     off.add_argument("--slug", required=True)
@@ -131,6 +194,8 @@ def main() -> int:
         return asyncio.run(add(args))
     if args.command == "list":
         return asyncio.run(show(args))
+    if args.command == "set":
+        return asyncio.run(edit(args))
     if args.command == "disable":
         return asyncio.run(switch(args, False))
     return asyncio.run(switch(args, True))

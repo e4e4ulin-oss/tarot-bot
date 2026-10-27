@@ -20,6 +20,12 @@ class UserMiddleware(BaseMiddleware):
     ) -> Any:
         tg_user = data.get("event_from_user")
         repo: Repo | None = data.get("repo")
+        settings = data.get("settings")
         if tg_user is not None and repo is not None and not tg_user.is_bot:
-            data["user"] = await repo.upsert_user(tg_user.id, tg_user.username, tg_user.first_name)
+            data["user"] = await repo.upsert_user(
+                tg_user.id,
+                tg_user.username,
+                tg_user.first_name,
+                subscribe_new=bool(settings and settings.daily_subscribe_new),
+            )
         return await handler(event, data)
