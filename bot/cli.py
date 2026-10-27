@@ -24,7 +24,7 @@ from sqlalchemy import select
 from .config import get_settings
 from .db import Repo, Tenant
 from .db.session import create_engine, create_session_factory, init_models
-from .tenants import bot_id_of
+from .tenants import EDITABLE, bot_id_of, cast_field
 
 
 async def add(args: argparse.Namespace) -> int:
@@ -99,36 +99,6 @@ async def switch(args: argparse.Namespace, active: bool) -> int:
     return 0
 
 
-# Что разрешено менять этой командой: только правила и цены. Токен и bot_id
-# сюда не входят — подменить бота арендатора одной строкой быть не должно
-EDITABLE: dict[str, type] = {
-    "title": str,
-    "author_name": str,
-    "currency": str,
-    "admin_chat_id": int,
-    "price_short": int,
-    "price_base": int,
-    "price_full": int,
-    "auto_reading_price": int,
-    "natal_reading_price": int,
-    "auto_reading_stars": int,
-    "natal_reading_stars": int,
-    "payment_method": str,
-    "free_auto_readings": int,
-    "free_without_daily": int,
-    "free_daily_limit": int,
-    "free_needs_daily": bool,
-    "payment_provider_token": str,
-    "miniapp_url": str,
-}
-
-
-def _cast(kind: type, raw: str) -> object:
-    if kind is bool:
-        return raw.strip().lower() in {"1", "true", "да", "yes", "on"}
-    return kind(raw)
-
-
 async def edit(args: argparse.Namespace) -> int:
     """Меняет одно поле арендатора. Бот подхватит значение при перезапуске."""
     if args.field not in EDITABLE:
@@ -147,7 +117,7 @@ async def edit(args: argparse.Namespace) -> int:
             return 1
 
         was = getattr(tenant, args.field)
-        setattr(tenant, args.field, _cast(EDITABLE[args.field], args.value))
+        setattr(tenant, args.field, cast_field(args.field, args.value))
         await session.commit()
         print(f"{args.slug}: {args.field} {was} → {getattr(tenant, args.field)}")
 

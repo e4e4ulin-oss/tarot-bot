@@ -46,6 +46,7 @@ from ..services.grok import GrokClient, GrokError
 from ..services.interpreter import Interpreter
 from ..services.server import LOGS_DEFAULT
 from ..tarot import SPREAD_ORDER, SPREADS, DrawnCard, deserialize, get_spread
+from ..tenants import cast_field
 from ..tiers import find_tier, followups_allowed, tier_label
 from ..tiers import tiers as author_tiers
 from .auth import AuthError, Identity, WebAppUser, init_data_from_header, verify
@@ -993,8 +994,50 @@ def deny_stranger(request: web.Request) -> web.Response | None:
 
 
 # --- Присмотр за сервером снаружи ----------------------------------------
-# Только чтение: версия, состояние службы, хвост журнала. Ни обновления, ни
-# перезапуска здесь нет и быть не должно — это доступ для глаз, а не для рук.
+# Присмотр снаружи: версия, состояние службы, хвост журнала — и цены, которые
+# можно поменять. Обновления и перезапуска здесь нет и быть не должно: менять
+# разрешено значения в базе, но не то, что исполняется на машине.
+#
+# Список полей здесь свой, короче общего: секрет один, и утёкший секрет не
+# должен уметь ни перенаправить оплату, ни увести людей на чужой адрес.
+# Поэтому ни токенов, ни адресов, ни чата заявок — только цены и правила.
+OPS_FIELDS = frozenset(
+    {
+        "auto_reading_price",
+        "natal_reading_price",
+        "auto_reading_stars",
+        "natal_reading_stars",
+        "payment_method",
+        "free_auto_readings",
+        "free_without_daily",
+        "free_daily_limit",
+        "free_needs_daily",
+        "price_short",
+        "price_base",
+        "price_full",
+    }
+)
+
+
+def tenant_json(brand: Tenant) -> dict[str, Any]:
+    """Арендатор снаружи. Цены живут в базе, а не в коде, и расхождение между
+    выложенной версией и тем, что на самом деле продаётся, иначе не увидеть.
+
+    Токенов здесь нет и быть не должно: только признак, настроен ли провайдер.
+    """
+    return {
+        "slug": brand.slug,
+        "active": brand.active,
+        "payment_method": brand.payment_method,
+        "provider_ready": bool(brand.payment_provider_token),
+        "stars": {"auto": brand.auto_reading_stars, "natal": brand.natal_reading_stars},
+        "roubles": {"auto": brand.auto_reading_price, "natal": brand.natal_reading_price},
+        "free": {
+            "total": brand.free_auto_readings,
+            "without_daily": brand.free_without_daily,
+            "per_day": brand.free_daily_limit,
+        },
+    }
 
 
 def ops_allowed(request: web.Request) -> web.Response | None:
@@ -1034,25 +1077,7 @@ async def handle_ops_status(request: web.Request) -> web.Response:
         counts = await Repo(session).stats()
         brands = list((await session.execute(select(Tenant).order_by(Tenant.id))).scalars())
 
-    # Цены живут в базе, а не в коде, и расхождение между выложенной версией и
-    # тем, что на самом деле продаётся, иначе никак не увидеть. Токенов здесь
-    # нет и быть не должно: только признак, настроен ли провайдер
-    tenants = [
-        {
-            "slug": brand.slug,
-            "active": brand.active,
-            "payment_method": brand.payment_method,
-            "provider_ready": bool(brand.payment_provider_token),
-            "stars": {"auto": brand.auto_reading_stars, "natal": brand.natal_reading_stars},
-            "roubles": {"auto": brand.auto_reading_price, "natal": brand.natal_reading_price},
-            "free": {
-                "total": brand.free_auto_readings,
-                "without_daily": brand.free_without_daily,
-                "per_day": brand.free_daily_limit,
-            },
-        }
-        for brand in brands
-    ]
+    tenants = [tenant_json(brand) for brand in brands]
 
     # systemctl отдаёт строки вида «ActiveState=active» — разбираем в словарь
     service = {}
@@ -1072,6 +1097,61 @@ async def handle_ops_status(request: web.Request) -> web.Response:
             "tenants": tenants,
         }
     )
+
+
+async def handle_ops_set(request: web.Request) -> web.Response:
+    """Поменять одну цену или одно правило у арендатора.
+
+    Подействует сразу: и чат, и приложение перечитывают арендатора на каждом
+    запросе. Утренняя рассылка и напоминания держат то, что получили при
+    старте, — им нужен перезапуск, но они и не про цены.
+    """
+    if (refusal := ops_allowed(request)) is not None:
+        return refusal
+
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    field = str(payload.get("field") or "").strip()
+    if field not in OPS_FIELDS:
+        return json_error(
+            "Менять можно: " + ", ".join(sorted(OPS_FIELDS)), 400, "unknown_field"
+        )
+
+    try:
+        value = cast_field(field, payload.get("value"))
+    except (TypeError, ValueError):
+        return json_error(f"«{payload.get('value')}» не подходит для {field}", 400, "bad_value")
+
+    slug = str(payload.get("slug") or "").strip()
+    async with request.app[SESSIONS]() as session:
+        query = select(Tenant)
+        # Без slug меняем единственного арендатора: на одном бренде называть
+        # его по имени — лишний шаг и лишний повод ошибиться
+        brands = list((await session.execute(query.order_by(Tenant.id))).scalars())
+        if slug:
+            brands = [brand for brand in brands if brand.slug == slug]
+        if not brands:
+            return json_error("Нет такого арендатора", 404, "unknown_tenant")
+        if len(brands) > 1:
+            return json_error(
+                "Арендаторов несколько — назовите slug: "
+                + ", ".join(brand.slug for brand in brands),
+                400,
+                "ambiguous_tenant",
+            )
+
+        brand = brands[0]
+        was = getattr(brand, field)
+        setattr(brand, field, value)
+        await session.commit()
+        # В журнал — чтобы правка снаружи оставляла след там же, где всё
+        # остальное, и её было видно тем же /api/ops/logs
+        logger.info("ops: %s.%s %s → %s", brand.slug, field, was, value)
+        return json_ok({"ok": True, "field": field, "was": was, "now": value,
+                        "tenant": tenant_json(brand)})
 
 
 async def handle_ops_logs(request: web.Request) -> web.Response:
@@ -1623,6 +1703,7 @@ def create_app(
     app.router.add_get("/api/invite", handle_invite)
     app.router.add_get("/api/ops/status", handle_ops_status)
     app.router.add_get("/api/ops/logs", handle_ops_logs)
+    app.router.add_post("/api/ops/set", handle_ops_set)
     app.router.add_get("/api/admin/orders", handle_admin_orders)
     app.router.add_get("/api/admin/orders/{order_id}", handle_admin_order_one)
     app.router.add_post("/api/admin/orders/{order_id}/take", handle_admin_order_take)

@@ -44,6 +44,46 @@ def overrides(tenant: Tenant) -> dict[str, object]:
     }
 
 
+# Что вообще разрешено менять у арендатора, не трогая код: только правила и
+# цены. Токен и bot_id сюда не входят — подменить бота арендатора одной
+# строкой быть не должно.
+EDITABLE: dict[str, type] = {
+    "title": str,
+    "author_name": str,
+    "currency": str,
+    "admin_chat_id": int,
+    "price_short": int,
+    "price_base": int,
+    "price_full": int,
+    "auto_reading_price": int,
+    "natal_reading_price": int,
+    "auto_reading_stars": int,
+    "natal_reading_stars": int,
+    "payment_method": str,
+    "free_auto_readings": int,
+    "free_without_daily": int,
+    "free_daily_limit": int,
+    "free_needs_daily": bool,
+    "payment_provider_token": str,
+    "miniapp_url": str,
+}
+
+TRUE_WORDS = frozenset({"1", "true", "да", "yes", "on"})
+
+
+def cast_field(field: str, raw: object) -> object:
+    """Приводит присланное значение к типу поля. Бросает ValueError, если не выходит."""
+    kind = EDITABLE[field]
+    if kind is bool:
+        if isinstance(raw, bool):
+            return raw
+        return str(raw).strip().lower() in TRUE_WORDS
+    if kind is int and isinstance(raw, bool):
+        # True — не единица: такое значение почти наверняка послано по ошибке
+        raise ValueError("ожидалось число")
+    return kind(raw)
+
+
 def settings_for(tenant: Tenant, base: Settings) -> Settings:
     """Настройки процесса, перекрытые тем, что принадлежит арендатору."""
     return base.model_copy(update=overrides(tenant))

@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 import pytest_asyncio
 from aiohttp.test_utils import TestClient, TestServer
+from sqlalchemy import select
 
 from bot.api.app import create_app
 from bot.config import Settings
@@ -180,14 +181,113 @@ async def test_with_no_token_in_settings_the_address_is_off(tmp_path):
     await client.engine.dispose()
 
 
-@pytest.mark.asyncio
-async def test_nothing_here_changes_anything(client):
-    """Присмотр — для глаз, а не для рук: ни обновления, ни перезапуска."""
+def test_nothing_here_touches_the_machine():
+    """Менять можно значения в базе — но не то, что исполняется на сервере.
+
+    Правка цен снаружи появилась сознательно. Обновление кода и перезапуск
+    службы — нет: там, где одна команда может заменить работающий код, цена
+    утёкшего секрета совсем другая.
+    """
     import inspect
 
     from bot.api import app as module
 
     source = inspect.getsource(module)
-    ops_part = source[source.index("def ops_allowed") : source.index("async def handle_admin_orders")]
-    for forbidden in ("update(", "restart(", "add_post"):
+    ops_part = source[
+        source.index("def ops_allowed") : source.index("async def handle_admin_orders")
+    ]
+    for forbidden in ("ops.update(", "ops.restart("):
         assert forbidden not in ops_part, forbidden
+
+
+def test_the_writable_fields_hold_no_secrets_and_no_addresses():
+    """Снаружи меняются цены и правила. Деньги и адреса — только с сервера."""
+    from bot.api.app import OPS_FIELDS
+    from bot.tenants import EDITABLE
+
+    assert OPS_FIELDS <= set(EDITABLE), OPS_FIELDS - set(EDITABLE)
+    for forbidden in ("payment_provider_token", "admin_chat_id", "miniapp_url", "title"):
+        assert forbidden not in OPS_FIELDS, forbidden
+
+
+# --- правка цен снаружи -----------------------------------------------------
+
+
+async def brand_of(client) -> Tenant:
+    factory = create_session_factory(client.engine)
+    async with factory() as session:
+        return (await session.execute(select(Tenant))).scalar_one()
+
+
+@pytest.mark.asyncio
+async def test_without_the_secret_nothing_can_be_changed(client):
+    """Дверь на запись закрыта тем же ключом и так же молчит о себе."""
+    for headers in ({}, key("не тот секрет")):
+        res = await client.post(
+            "/api/ops/set", headers=headers, json={"field": "auto_reading_stars", "value": 10}
+        )
+        assert res.status == 404
+
+    assert (await brand_of(client)).auto_reading_stars == 50
+
+
+@pytest.mark.asyncio
+async def test_the_price_changes_and_says_what_it_was(client):
+    res = await client.post(
+        "/api/ops/set", headers=key(), json={"field": "auto_reading_stars", "value": 100}
+    )
+    assert res.status == 200
+
+    data = await res.json()
+    assert (data["was"], data["now"]) == (50, 100)
+    assert data["tenant"]["stars"]["auto"] == 100
+    assert (await brand_of(client)).auto_reading_stars == 100
+
+
+@pytest.mark.asyncio
+async def test_a_token_cannot_be_set_through_this_door(client):
+    """Поле есть в общем списке, но снаружи его менять нельзя: это деньги."""
+    for field, value in (
+        ("payment_provider_token", "1:LIVE:чужой"),
+        ("admin_chat_id", -100500),
+        ("miniapp_url", "https://чужой.сайт/"),
+    ):
+        res = await client.post(
+            "/api/ops/set", headers=key(), json={"field": field, "value": value}
+        )
+        assert res.status == 400
+        assert (await res.json())["error"] == "unknown_field"
+
+    brand = await brand_of(client)
+    assert brand.payment_provider_token == "1:LIVE:секрет"
+    assert brand.admin_chat_id == 0
+
+
+@pytest.mark.asyncio
+async def test_a_value_of_the_wrong_kind_is_refused(client):
+    res = await client.post(
+        "/api/ops/set", headers=key(), json={"field": "auto_reading_stars", "value": "дёшево"}
+    )
+    assert res.status == 400
+    assert (await res.json())["error"] == "bad_value"
+    assert (await brand_of(client)).auto_reading_stars == 50
+
+
+@pytest.mark.asyncio
+async def test_a_rule_can_be_switched_by_a_word(client):
+    res = await client.post(
+        "/api/ops/set", headers=key(), json={"field": "free_needs_daily", "value": "нет"}
+    )
+    assert res.status == 200
+    assert (await brand_of(client)).free_needs_daily is False
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_tenant_changes_nothing(client):
+    res = await client.post(
+        "/api/ops/set",
+        headers=key(),
+        json={"slug": "чужой", "field": "auto_reading_stars", "value": 10},
+    )
+    assert res.status == 404
+    assert (await brand_of(client)).auto_reading_stars == 50
