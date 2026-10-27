@@ -198,12 +198,10 @@ async def handle_config(request: web.Request) -> web.Response:
                 }
                 for tier in author_tiers(settings)
             ],
-            # Цены — в той валюте, которой сейчас платят: показывать рубли и
-            # списывать звёзды было бы обманом
-            "auto_price": auto.price if auto else settings.auto_reading_price,
-            "natal_price": natal.price if natal else settings.natal_reading_price,
-            "pay_unit": auto.unit if auto else settings.author_currency,
-            "pay_method": auto.method if auto else None,
+            # Цены в звёздах: ими и платят
+            "auto_price": auto.price if auto else 0,
+            "natal_price": natal.price if natal else 0,
+            "pay_unit": billing.STARS_SIGN,
             "free_readings": settings.free_auto_readings,
             "free_needs_daily": settings.free_needs_daily,
             "free_without_daily": settings.free_without_daily,
@@ -590,8 +588,8 @@ async def handle_natal_get(request: web.Request) -> web.Response:
             "ready": True,
             "written": False,
             "paid": paid is not None or settings.is_admin(identity.user.id),
-            "price": deal.price if deal else settings.natal_reading_price,
-            "currency": deal.unit if deal else settings.author_currency,
+            "price": deal.price if deal else 0,
+            "currency": billing.STARS_SIGN,
         }
     )
 
@@ -999,15 +997,12 @@ def deny_stranger(request: web.Request) -> web.Response | None:
 # разрешено значения в базе, но не то, что исполняется на машине.
 #
 # Список полей здесь свой, короче общего: секрет один, и утёкший секрет не
-# должен уметь ни перенаправить оплату, ни увести людей на чужой адрес.
-# Поэтому ни токенов, ни адресов, ни чата заявок — только цены и правила.
+# должен уметь увести людей на чужой адрес. Поэтому ни адресов, ни чата
+# заявок — только цены и правила.
 OPS_FIELDS = frozenset(
     {
-        "auto_reading_price",
-        "natal_reading_price",
         "auto_reading_stars",
         "natal_reading_stars",
-        "payment_method",
         "free_auto_readings",
         "free_without_daily",
         "free_daily_limit",
@@ -1023,15 +1018,12 @@ def tenant_json(brand: Tenant) -> dict[str, Any]:
     """Арендатор снаружи. Цены живут в базе, а не в коде, и расхождение между
     выложенной версией и тем, что на самом деле продаётся, иначе не увидеть.
 
-    Токенов здесь нет и быть не должно: только признак, настроен ли провайдер.
+    Токенов здесь нет и быть не должно.
     """
     return {
         "slug": brand.slug,
         "active": brand.active,
-        "payment_method": brand.payment_method,
-        "provider_ready": bool(brand.payment_provider_token),
         "stars": {"auto": brand.auto_reading_stars, "natal": brand.natal_reading_stars},
-        "roubles": {"auto": brand.auto_reading_price, "natal": brand.natal_reading_price},
         "free": {
             "total": brand.free_auto_readings,
             "without_daily": brand.free_without_daily,
@@ -1488,7 +1480,7 @@ async def handle_invoice(request: web.Request) -> web.Response:
     if bot is None:
         return json_error("Бот недоступен", 503, "no_bot")
 
-    link = await bot.create_invoice_link(**billing.invoice_kwargs(settings, deal))
+    link = await bot.create_invoice_link(**billing.invoice_kwargs(deal))
     return json_ok({"link": link, "price": deal.price, "currency": deal.unit})
 
 

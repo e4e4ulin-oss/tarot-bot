@@ -51,9 +51,8 @@ async def add(args: argparse.Namespace) -> int:
             price_short=args.price_short,
             price_base=args.price_base,
             price_full=args.price_full,
-            auto_reading_price=args.auto_price,
+            auto_reading_stars=args.auto_stars,
             free_auto_readings=args.free,
-            payment_provider_token=args.provider_token,
             miniapp_url=args.miniapp_url,
         )
         session.add(tenant)
@@ -140,9 +139,8 @@ def build_parser() -> argparse.ArgumentParser:
     new.add_argument("--price-short", type=int, default=500)
     new.add_argument("--price-base", type=int, default=700)
     new.add_argument("--price-full", type=int, default=1000)
-    new.add_argument("--auto-price", type=int, default=369)
+    new.add_argument("--auto-stars", type=int, default=50, help="цена расклада в звёздах")
     new.add_argument("--free", type=int, default=5, help="бесплатных раскладов")
-    new.add_argument("--provider-token", default="", help="платёжный провайдер франчайзи")
     new.add_argument("--miniapp-url", default="", help="адрес его мини-приложения")
 
     commands.add_parser("list", help="показать арендаторов")

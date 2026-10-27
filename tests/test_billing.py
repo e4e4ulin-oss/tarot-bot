@@ -20,38 +20,10 @@ def make_settings(**extra) -> Settings:
     return Settings(BOT_TOKEN="123:abc", XAI_API_KEY="", **extra)
 
 
-def test_stars_need_nobody_s_permission():
-    """По умолчанию платят звёздами: им не нужен ни провайдер, ни токен."""
-    assert billing.method(make_settings()) == billing.STARS
-
-
-def test_the_provider_without_a_token_is_not_a_way_to_pay():
-    chosen = make_settings(PAYMENT_METHOD="provider")
-    assert billing.method(chosen) is None
-    assert billing.terms(chosen) is None
-
-    ready = make_settings(PAYMENT_METHOD="provider", PAYMENT_PROVIDER_TOKEN="1:LIVE:x")
-    assert billing.method(ready) == billing.PROVIDER
-
-
-def test_an_unknown_method_falls_back_to_stars():
-    """Опечатка в настройке не должна оставлять бота без приёма денег."""
-    assert billing.method(make_settings(PAYMENT_METHOD="звёзды")) == billing.STARS
-
-
-def test_the_price_comes_in_the_currency_that_is_charged():
-    stars = billing.terms(make_settings(AUTO_READING_STARS=250), billing.PAYLOAD_AUTO)
-    assert (stars.price, stars.unit, stars.currency) == (250, "⭐", "XTR")
-
-    rubles = billing.terms(
-        make_settings(
-            PAYMENT_METHOD="provider",
-            PAYMENT_PROVIDER_TOKEN="1:LIVE:x",
-            AUTO_READING_PRICE=369,
-        ),
-        billing.PAYLOAD_AUTO,
-    )
-    assert (rubles.price, rubles.unit, rubles.currency) == (369, "₽", "RUB")
+def test_the_price_is_in_stars_and_nothing_else():
+    """Платят звёздами: валюта XTR, знак ⭐, и никакого токена провайдера."""
+    deal = billing.terms(make_settings(AUTO_READING_STARS=50), billing.PAYLOAD_AUTO)
+    assert (deal.price, deal.unit, deal.currency) == (50, "⭐", "XTR")
 
 
 def test_the_deep_reading_is_priced_apart_from_the_spread():
@@ -64,28 +36,20 @@ def test_a_price_of_zero_is_an_empty_setting_not_a_gift():
     assert billing.terms(make_settings(AUTO_READING_STARS=0)) is None
 
 
-def test_stars_are_counted_in_whole_ones_and_roubles_in_kopecks():
-    stars = billing.terms(make_settings(AUTO_READING_STARS=250))
-    kwargs = billing.invoice_kwargs(make_settings(), stars)
+def test_stars_are_counted_in_whole_ones():
+    """Копеек у звезды нет: 250 — это 250, а не 25 000."""
+    kwargs = billing.invoice_kwargs(billing.terms(make_settings(AUTO_READING_STARS=250)))
     assert kwargs["currency"] == "XTR"
     assert [price.amount for price in kwargs["prices"]] == [250]
     # Для звёзд токена нет и быть не должно
     assert kwargs["provider_token"] == ""
 
-    paying = make_settings(
-        PAYMENT_METHOD="provider", PAYMENT_PROVIDER_TOKEN="1:LIVE:x", AUTO_READING_PRICE=369
-    )
-    kwargs = billing.invoice_kwargs(paying, billing.terms(paying))
-    assert kwargs["currency"] == "RUB"
-    assert [price.amount for price in kwargs["prices"]] == [36900]
-    assert kwargs["provider_token"] == "1:LIVE:x"
-
 
 def test_the_invoice_names_the_goods():
     """Счёт за расклад и счёт за разбор карты — разные товары, и это видно."""
     settings = make_settings()
-    spread = billing.invoice_kwargs(settings, billing.terms(settings, billing.PAYLOAD_AUTO))
-    deep = billing.invoice_kwargs(settings, billing.terms(settings, billing.PAYLOAD_NATAL))
+    spread = billing.invoice_kwargs(billing.terms(settings, billing.PAYLOAD_AUTO))
+    deep = billing.invoice_kwargs(billing.terms(settings, billing.PAYLOAD_NATAL))
 
     assert spread["payload"] == "auto_reading"
     assert deep["payload"] == "natal_reading"
@@ -94,6 +58,7 @@ def test_the_invoice_names_the_goods():
 
 def test_what_arrived_is_read_in_the_same_units():
     assert billing.received("XTR", 250) == 250
+    # Рубли остались только в старых платежах, и считал их Telegram копейками
     assert billing.received("RUB", 36900) == 369
 
 

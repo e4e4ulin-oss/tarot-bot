@@ -48,7 +48,7 @@ async def test_each_tenant_brings_its_own_prices(factory):
                 author_name="Второй",
                 currency="₽",
                 price_full=2500,
-                auto_reading_price=499,
+                auto_reading_stars=499,
                 free_auto_readings=1,
             )
         )
@@ -60,7 +60,7 @@ async def test_each_tenant_brings_its_own_prices(factory):
 
     assert first.author_name == "Первый" and second.author_name == "Второй"
     assert second.author_price_full == 2500
-    assert second.auto_reading_price == 499
+    assert second.auto_reading_stars == 499
     assert second.free_auto_readings == 1
     # Общее остаётся общим: ключи моделей и адрес базы не подменяются
     assert second.database_url == settings.database_url

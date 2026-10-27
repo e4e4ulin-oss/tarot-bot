@@ -60,7 +60,6 @@ async def make_client(tmp_path, token: str = SECRET, broken: bool = False):
                 bot_id=123,
                 auto_reading_stars=50,
                 natal_reading_stars=150,
-                payment_provider_token="1:LIVE:секрет",
             )
         )
         await session.commit()
@@ -132,20 +131,14 @@ async def test_the_status_shows_what_is_actually_being_sold(client):
     brand = (await res.json())["tenants"][0]
 
     assert brand["slug"] == "default"
-    assert brand["payment_method"] == "stars"
     assert brand["stars"] == {"auto": 50, "natal": 150}
     assert brand["free"]["per_day"] == 2
 
 
 @pytest.mark.asyncio
-async def test_the_status_tells_about_the_provider_without_telling_its_token(client):
+async def test_the_status_never_tells_a_token(client):
     res = await client.get("/api/ops/status", headers=key())
-    body = await res.text()
-
-    assert (await res.json())["tenants"][0]["provider_ready"] is True
-    # Признак — да, сам токен — никогда
-    assert "1:LIVE" not in body
-    assert "123:abc" not in body
+    assert "123:abc" not in await res.text()
 
 
 @pytest.mark.asyncio
@@ -206,7 +199,7 @@ def test_the_writable_fields_hold_no_secrets_and_no_addresses():
     from bot.tenants import EDITABLE
 
     assert OPS_FIELDS <= set(EDITABLE), OPS_FIELDS - set(EDITABLE)
-    for forbidden in ("payment_provider_token", "admin_chat_id", "miniapp_url", "title"):
+    for forbidden in ("bot_token", "admin_chat_id", "miniapp_url", "title"):
         assert forbidden not in OPS_FIELDS, forbidden
 
 
@@ -246,11 +239,11 @@ async def test_the_price_changes_and_says_what_it_was(client):
 
 @pytest.mark.asyncio
 async def test_a_token_cannot_be_set_through_this_door(client):
-    """Поле есть в общем списке, но снаружи его менять нельзя: это деньги."""
+    """Эти поля снаружи менять нельзя: ими уводят людей и деньги."""
     for field, value in (
-        ("payment_provider_token", "1:LIVE:чужой"),
         ("admin_chat_id", -100500),
         ("miniapp_url", "https://чужой.сайт/"),
+        ("bot_token", "123:чужой"),
     ):
         res = await client.post(
             "/api/ops/set", headers=key(), json={"field": field, "value": value}
@@ -259,8 +252,8 @@ async def test_a_token_cannot_be_set_through_this_door(client):
         assert (await res.json())["error"] == "unknown_field"
 
     brand = await brand_of(client)
-    assert brand.payment_provider_token == "1:LIVE:секрет"
     assert brand.admin_chat_id == 0
+    assert brand.bot_token == "123:abc"
 
 
 @pytest.mark.asyncio

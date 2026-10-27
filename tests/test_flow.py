@@ -131,10 +131,6 @@ async def app(tmp_path_factory):
         FREE_AUTO_READINGS=50,
         FREE_NEEDS_DAILY=False,
         DAILY_AUTO_LIMIT=5,
-        # Эти сценарии про рублёвый путь: цена показывается только там, где
-        # товар можно купить, значит провайдер должен быть настроен
-        PAYMENT_METHOD="provider",
-        PAYMENT_PROVIDER_TOKEN="1:TEST:flow",
     )
     engine = create_engine(settings.database_url)
     await init_models(engine)
@@ -1227,7 +1223,7 @@ async def test_the_deep_reading_is_offered_for_money(env):
     session.clear()
     await feed(dp, bot, make_callback("natal:offer", chat_id=chat), 1)
     body = "\n".join(session.texts())
-    assert "990" in body
+    assert "150" in body
 
 
 @pytest.mark.asyncio(loop_scope="module")
@@ -1242,7 +1238,7 @@ async def test_without_payment_the_text_is_not_written(env):
 
     async with factory() as db:
         assert await Repo(db).last_natal(chat) is None
-    assert any("990" in text for text in session.texts())
+    assert any("150" in text for text in session.texts())
 
 
 @pytest.mark.asyncio(loop_scope="module")

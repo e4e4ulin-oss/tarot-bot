@@ -47,27 +47,13 @@ class Settings(BaseSettings):
     # Карта дня включается сама при первом приходе — она же открывает
     # бесплатные расклады, и человеку об этом говорят сразу
     daily_subscribe_new: bool = Field(default=True, alias="DAILY_SUBSCRIBE_NEW")
-    # Цена одного расклада после того, как бесплатные кончились
-    auto_reading_price: int = Field(default=369, alias="AUTO_READING_PRICE")
-    # Подробный разбор натальной карты: пишется один раз и надолго,
-    # поэтому и стоит иначе, чем расклад
-    natal_reading_price: int = Field(default=990, alias="NATAL_READING_PRICE")
-    # Цены тех же товаров в звёздах Telegram. Отдельные числа, а не пересчёт
-    # по курсу: курс звезды к рублю плавает, а цена должна быть ровной.
+    # Цены в звёздах Telegram — единственный способ оплаты. Так велят правила
+    # Telegram для цифровых услуг: валюта XTR, токен провайдера не нужен.
     # Кратно пятидесяти: звёзды продаются пакетами от 100 штук, и цена в
     # половину минимального пакета не оставляет неразменного остатка —
     # купленная сотня покрывает ровно два расклада
     auto_reading_stars: int = Field(default=50, alias="AUTO_READING_STARS")
     natal_reading_stars: int = Field(default=150, alias="NATAL_READING_STARS")
-    # Чем принимаем оплату: "stars" — звёзды Telegram, "provider" — рубли
-    # через платёжного провайдера. По умолчанию звёзды: им не нужен ни токен,
-    # ни одобрение эквайера, и правилам Telegram для цифровых услуг отвечают
-    # именно они. Провайдеру нужен токен, и без него оплата не предлагается.
-    payment_method: str = Field(default="stars", alias="PAYMENT_METHOD")
-    # Токен платёжного провайдера от BotFather. Пусто — оплата не предлагается,
-    # и бот честно говорит, что платные расклады пока не подключены.
-    payment_provider_token: str = Field(default="", alias="PAYMENT_PROVIDER_TOKEN")
-    payment_currency: str = Field(default="RUB", alias="PAYMENT_CURRENCY")
 
     # --- Мини-приложение ---
     # Адрес опубликованной колоды. По умолчанию — страница, которую собирает

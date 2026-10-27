@@ -214,18 +214,19 @@ async def test_a_column_forgotten_in_the_list_is_added_from_the_model(tmp_path: 
 
     await init_models(engine)
 
-    assert {"natal_reading_price", "miniapp_url", "payment_provider_token"} <= await columns(
-        engine, "tenants"
-    )
+    now = await columns(engine, "tenants")
+    assert {"natal_reading_stars", "auto_reading_stars", "miniapp_url"} <= now
+    # Рублёвый провайдер ушёл вместе со своим кодом, и колонки за ним
+    assert {"auto_reading_price", "payment_provider_token"} & now == set()
 
     # Старый арендатор на месте, а новая цена взялась из значения по умолчанию
     async with engine.begin() as conn:
         kept = (
             await conn.execute(
-                text("SELECT title, natal_reading_price, miniapp_url FROM tenants WHERE id = 1")
+                text("SELECT title, natal_reading_stars, miniapp_url FROM tenants WHERE id = 1")
             )
         ).first()
-    assert kept == ("Свой бот", 990, "")
+    assert kept == ("Свой бот", 150, "")
 
     await engine.dispose()
 

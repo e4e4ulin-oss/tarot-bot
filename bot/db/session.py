@@ -131,6 +131,42 @@ def _column_ddl(column, dialect) -> str:
     return f"{kind} DEFAULT {filler} NOT NULL"
 
 
+# Колонки, которых в модели больше нет. SQLite не считает лишнюю колонку
+# ошибкой, но обязательная колонка без значения по умолчанию ломает вставку
+# новой строки: модель о ней не знает, а таблица требует. Поэтому убираем.
+RETIRED: tuple[tuple[str, str], ...] = (
+    # Рублёвый платёжный провайдер. Цифровые услуги Telegram продаёт за
+    # звёзды, и второго способа оплаты у бота нет.
+    ("tenants", "auto_reading_price"),
+    ("tenants", "natal_reading_price"),
+    ("tenants", "payment_method"),
+    ("tenants", "payment_provider_token"),
+)
+
+
+def _drop_retired(conn) -> None:
+    """Убирает колонки, которые пережили свой код."""
+    inspector = inspect(conn)
+    tables = set(inspector.get_table_names())
+    for table, column in RETIRED:
+        if table not in tables:
+            continue
+        if column not in {item["name"] for item in inspector.get_columns(table)}:
+            continue
+        try:
+            conn.execute(text(f"ALTER TABLE {table} DROP COLUMN {column}"))
+        except Exception as exc:  # старый SQLite такого не умеет
+            logger.warning(
+                "Колонку %s.%s убрать не вышло (%s). Бот работает, но завести "
+                "нового арендатора может не получиться",
+                table,
+                column,
+                exc,
+            )
+            continue
+        logger.info("Убираю колонку %s.%s: её кода больше нет", table, column)
+
+
 def _add_from_model(conn) -> None:
     """Дописывает всё, что есть в модели и чего нет в таблице.
 
@@ -225,6 +261,9 @@ async def _upgrade(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
         await conn.run_sync(_add_missing_columns)
         await conn.run_sync(_add_from_model)
+        # После добавления, а не до: сперва схема догоняет модель, и только
+        # потом из неё уходит лишнее
+        await conn.run_sync(_drop_retired)
         parked = await conn.run_sync(_park_tables_without_tenant_key)
         await conn.run_sync(Base.metadata.create_all)
         if parked:

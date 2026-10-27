@@ -404,9 +404,9 @@ async def test_the_invoice_is_issued_in_stars(client_with_bot):
 
 @pytest.mark.asyncio
 async def test_invoice_says_when_payments_are_not_set_up(client_with_bot):
-    """Выбран провайдер, токена нет — платить нечем, и приложение это объясняет."""
+    """Цена в ноль звёзд — не бесплатный товар, а незаполненная настройка."""
     brand = client_with_bot.app[BRAND]
-    brand.payment_method = "provider"
+    brand.auto_reading_stars = 0
     try:
         res = await client_with_bot.post(
             "/api/invoice", headers=auth(user_id=47), json={"kind": "auto"}
@@ -414,7 +414,7 @@ async def test_invoice_says_when_payments_are_not_set_up(client_with_bot):
         assert res.status == 409
         assert (await res.json())["error"] == "payment_not_ready"
     finally:
-        brand.payment_method = "stars"
+        brand.auto_reading_stars = 50
 
 
 class FakeBot:

@@ -34,12 +34,8 @@ def overrides(tenant: Tenant) -> dict[str, object]:
         "free_needs_daily": tenant.free_needs_daily,
         "free_without_daily": tenant.free_without_daily,
         "free_daily_limit": tenant.free_daily_limit,
-        "auto_reading_price": tenant.auto_reading_price,
-        "natal_reading_price": tenant.natal_reading_price,
         "auto_reading_stars": tenant.auto_reading_stars,
         "natal_reading_stars": tenant.natal_reading_stars,
-        "payment_method": tenant.payment_method,
-        "payment_provider_token": tenant.payment_provider_token,
         "miniapp_url": tenant.miniapp_url or Settings.model_fields["miniapp_url"].default,
     }
 
@@ -55,16 +51,12 @@ EDITABLE: dict[str, type] = {
     "price_short": int,
     "price_base": int,
     "price_full": int,
-    "auto_reading_price": int,
-    "natal_reading_price": int,
     "auto_reading_stars": int,
     "natal_reading_stars": int,
-    "payment_method": str,
     "free_auto_readings": int,
     "free_without_daily": int,
     "free_daily_limit": int,
     "free_needs_daily": bool,
-    "payment_provider_token": str,
     "miniapp_url": str,
 }
 
@@ -125,12 +117,8 @@ async def ensure_default(session: AsyncSession, settings: Settings) -> Tenant | 
         price_full=settings.author_price_full,
         free_auto_readings=settings.free_auto_readings,
         free_needs_daily=settings.free_needs_daily,
-        auto_reading_price=settings.auto_reading_price,
-        natal_reading_price=settings.natal_reading_price,
         auto_reading_stars=settings.auto_reading_stars,
         natal_reading_stars=settings.natal_reading_stars,
-        payment_method=settings.payment_method,
-        payment_provider_token=settings.payment_provider_token,
         miniapp_url=settings.miniapp_url,
     )
     session.add(tenant)

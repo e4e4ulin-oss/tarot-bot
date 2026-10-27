@@ -100,22 +100,19 @@ async def test_the_one_who_paid_hits_no_ceiling(repo):
 
 
 @pytest.mark.asyncio
-async def test_without_a_way_to_pay_the_reason_says_so(repo):
-    """«Заплатите» без подключённого приёма денег — тупик, и он называется иначе."""
-    settings = make_settings(FREE_AUTO_READINGS=0, PAYMENT_METHOD="provider")
-    decision = await ask(repo, settings)
+async def test_when_the_free_ones_run_out_the_answer_is_pay(repo):
+    """Звёздам не нужен ни провайдер, ни его одобрение: платить есть чем всегда."""
+    decision = await ask(repo, make_settings(FREE_AUTO_READINGS=0))
 
     assert isinstance(decision, reading.Refused)
-    assert decision.reason == "payment_not_ready"
+    assert decision.reason == "needs_payment"
 
-    paid = make_settings(
-        FREE_AUTO_READINGS=0, PAYMENT_METHOD="provider", PAYMENT_PROVIDER_TOKEN="test:token"
-    )
-    assert (await ask(repo, paid)).reason == "needs_payment"
 
-    # Звёздам провайдер не нужен: платить есть чем всегда
-    stars = make_settings(FREE_AUTO_READINGS=0, PAYMENT_METHOD="stars")
-    assert (await ask(repo, stars)).reason == "needs_payment"
+@pytest.mark.asyncio
+async def test_a_price_of_zero_is_a_dead_end_and_says_so(repo):
+    """Незаполненная цена — не бесплатный товар: счёт на ноль звёзд не выставить."""
+    settings = make_settings(FREE_AUTO_READINGS=0, AUTO_READING_STARS=0)
+    assert (await ask(repo, settings)).reason == "payment_not_ready"
 
 
 @pytest.mark.asyncio

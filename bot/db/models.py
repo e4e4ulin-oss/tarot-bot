@@ -311,7 +311,7 @@ class Tenant(Base):
 
     Франчайзи получает собственного бота под своим именем, но код, сервер и
     база остаются общими. Всё, чем один бренд отличается от другого, лежит
-    здесь: токен, имя, цены, платёжный провайдер. Имя и аватарку бота владелец
+    здесь: токен, имя, цены. Имя и аватарку бота владелец
     ставит у BotFather сам — туда сервис не лезет.
     """
 
@@ -340,17 +340,10 @@ class Tenant(Base):
     # Сколько бесплатных остаётся без подписки и сколько можно за сутки
     free_without_daily: Mapped[int] = mapped_column(Integer, default=2, server_default="2")
     free_daily_limit: Mapped[int] = mapped_column(Integer, default=2, server_default="2")
-    auto_reading_price: Mapped[int] = mapped_column(Integer, default=369)
-    natal_reading_price: Mapped[int] = mapped_column(Integer, default=990)
-    # Те же цены в звёздах и способ оплаты: у каждого бренда свой счёт, и
-    # рубли с звёздами он выбирает сам
+    # Цены в звёздах: платят только ими. Деньги идут на звёздный баланс
+    # владельца бота, то есть самого арендатора
     auto_reading_stars: Mapped[int] = mapped_column(Integer, default=50, server_default="50")
     natal_reading_stars: Mapped[int] = mapped_column(Integer, default=150, server_default="150")
-    payment_method: Mapped[str] = mapped_column(
-        String(16), default="stars", server_default="stars"
-    )
-    # Деньги идут на счёт арендатора, поэтому и токен провайдера его
-    payment_provider_token: Mapped[str] = mapped_column(String(128), default="")
 
     miniapp_url: Mapped[str] = mapped_column(String(256), default="")
 
