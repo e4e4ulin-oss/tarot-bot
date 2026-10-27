@@ -73,21 +73,21 @@ def test_nothing_to_press_at_the_start():
 def test_the_name_is_demanded_now_and_then_not_every_turn():
     """После порога бот обязан назвать имя — но не сыпать ими подряд."""
     early = Game(turns=[turn(verdict=guess.YES)] * (guess.GUESS_AFTER - 1))
-    assert guess.must_guess(early) is False
+    assert guess.must_name(early) is False
 
     due = Game(turns=[turn(verdict=guess.YES)] * guess.GUESS_AFTER)
-    assert guess.must_guess(due) is True
+    assert guess.must_name(due) is True
 
     # Назвал мимо — следующий раз не сразу
-    missed = Game(turns=due.turns, guesses=["Фредди Меркьюри"])
-    assert guess.must_guess(missed) is False
-    assert guess.must_guess(Game(turns=[turn()] * (guess.GUESS_AFTER + 5), guesses=["Кто-то"]))
+    missed = Game(turns=due.turns, missed=["Фредди Меркьюри"])
+    assert guess.must_name(missed) is False
+    assert guess.must_name(Game(turns=[turn()] * (guess.GUESS_AFTER + 5), missed=["Кто-то"]))
 
 
-def test_a_player_out_of_guesses_is_not_asked_for_another():
-    spent = Game(turns=[turn()] * 20, guesses=["Раз", "Два", "Три"])
-    assert spent.out_of_guesses is True
-    assert guess.must_guess(spent) is False
+def test_a_player_out_of_names_is_not_asked_for_another():
+    spent = Game(turns=[turn()] * 20, missed=["Раз", "Два", "Три"])
+    assert spent.out_of_names is True
+    assert guess.must_name(spent) is False
 
 
 def test_the_party_has_an_end():
@@ -102,13 +102,13 @@ def test_a_plain_object_is_read():
     step = guess.parse('{"question": "Он жив?", "reading": "Солнце светит — да"}')
     assert step.question == "Он жив?"
     assert step.reading == "Солнце светит — да"
-    assert step.guessing is False
+    assert step.naming is False
 
 
 def test_a_fenced_object_is_read_too():
-    step = guess.parse('```json\n{"guess": "Пушкин", "reading": "Звезда зовёт имя"}\n```')
-    assert step.guessing is True
-    assert step.guess == "Пушкин"
+    step = guess.parse('```json\n{"names": ["Пушкин"], "reading": "Звезда зовёт имя"}\n```')
+    assert step.naming is True
+    assert step.names == ["Пушкин"]
 
 
 def test_an_object_buried_in_chatter_is_dug_out():
@@ -146,50 +146,50 @@ def test_the_prompt_asks_to_press_after_a_rejection():
 
 def test_the_prompt_demands_a_name_when_it_is_time():
     game = Game(turns=[turn(verdict=guess.YES)] * guess.GUESS_AFTER)
-    assert "Пора назвать имя" in guess.prompt(game, "Звезда", CARD_YES)
+    assert "Пора назвать одного" in guess.prompt(game, "Звезда", CARD_YES)
 
 
 def test_the_prompt_lists_the_names_already_missed():
-    game = Game(turns=[turn(verdict=guess.YES)], guesses=["Цой", "Высоцкий"])
+    game = Game(turns=[turn(verdict=guess.YES)], missed=["Цой", "Высоцкий"])
     assert "Цой, Высоцкий" in guess.prompt(game, "Луна", CARD_YES)
 
 
 # --- переход состояния ------------------------------------------------------
 
 
-def guessing_turn(name="Фредди Меркьюри"):
+def naming_turn(*names):
+    """Ход, где карты называют одного или показывают направление."""
     return Turn(
-        question="",
+        names=list(names or ["Фредди Меркьюри"]),
         card="major_17",
         card_answer=CARD_YES,
-        reading="Звезда называет имя",
-        guess=name,
+        reading="Звезда показывает лицо",
     )
 
 
 def test_a_right_name_ends_the_party():
-    game = Game(turns=[guessing_turn()])
+    game = Game(turns=[naming_turn()])
     guess.grade(game, guess.YES)
     assert game.status == guess.WON
-    assert game.guesses == []
+    assert game.missed == []
 
 
 def test_a_wrong_name_is_remembered_and_the_party_goes_on():
-    game = Game(turns=[guessing_turn("Цой")])
+    game = Game(turns=[naming_turn("Цой")])
     guess.grade(game, guess.NO)
     assert game.status == guess.ACTIVE
-    assert game.guesses == ["Цой"]
+    assert game.missed == ["Цой"]
 
 
 def test_a_missed_name_is_not_a_fact_about_the_person():
-    game = Game(turns=[guessing_turn("Цой"), turn("Он музыкант?", CARD_YES, guess.YES)])
+    game = Game(turns=[naming_turn("Цой"), turn("Он музыкант?", CARD_YES, guess.YES)])
     game.turns[0].verdict = guess.NO
     assert guess.facts(game) == ["Он музыкант? — да"]
 
 
 def test_a_name_takes_only_yes_or_no():
     for soft in (guess.MAYBE, guess.UNKNOWN):
-        game = Game(turns=[guessing_turn()])
+        game = Game(turns=[naming_turn()])
         try:
             guess.grade(game, soft)
         except ValueError:
@@ -222,14 +222,78 @@ def test_the_bot_concedes_when_the_budget_runs_out():
 
 
 def test_the_bot_concedes_after_the_last_wrong_name():
-    game = Game(turns=[guessing_turn("Три")], guesses=["Раз", "Два"])
+    game = Game(turns=[naming_turn("Три")], missed=["Раз", "Два"])
     guess.grade(game, guess.NO)
-    assert game.guesses == ["Раз", "Два", "Три"]
+    assert game.missed == ["Раз", "Два", "Три"]
     assert game.status == guess.LOST
 
 
 def test_a_rejected_name_does_not_start_a_follow_up():
     """Уточнять нечего: промах по имени — не ось, которую можно дожать."""
-    game = Game(turns=[guessing_turn()])
+    game = Game(turns=[naming_turn()])
     guess.grade(game, guess.NO)
     assert guess.needs_follow_up(game) is False
+
+
+# --- направление: карты показывают типаж, а не одного ----------------------
+
+
+def test_a_direction_is_graded_by_the_person_not_flipped_by_the_card():
+    """Вопрос поверяют картой, направление — собой. Перепутать это — провалить игру."""
+    lead = naming_turn("Леонардо Ди Каприо", "Мэтт Дэймон")
+    lead.card_answer = CARD_NO  # карта легла «нет», но к направлению это не относится
+    lead.verdict = guess.YES
+    assert guess.truth(lead) is True
+
+    wrong = naming_turn("Пушкин", "Лермонтов")
+    wrong.card_answer = CARD_YES
+    wrong.verdict = guess.NO
+    assert guess.truth(wrong) is False
+
+
+def test_a_direction_narrows_the_circle_like_a_question_does():
+    game = Game(turns=[naming_turn("Леонардо Ди Каприо", "Мэтт Дэймон")])
+    guess.grade(game, guess.YES)
+
+    assert guess.facts(game) == [
+        "типаж вроде «Леонардо Ди Каприо или Мэтт Дэймон» — в нужном русле"
+    ]
+    # Направление мимо — не промах по имени: его в список названных не пишут
+    assert game.missed == []
+    assert game.status == guess.ACTIVE
+
+
+def test_a_rejected_direction_cuts_off_a_whole_type():
+    game = Game(turns=[naming_turn("Пушкин", "Лермонтов")])
+    guess.grade(game, guess.NO)
+    assert guess.facts(game) == ["типаж вроде «Пушкин или Лермонтов» — не те"]
+    assert game.missed == []
+
+
+def test_a_direction_never_wins_the_party():
+    """Подтверждённое русло — это ещё не имя: закрыть партию может только один."""
+    game = Game(turns=[naming_turn("Ди Каприо", "Мэтт Дэймон")])
+    guess.grade(game, guess.YES)
+    assert game.status == guess.ACTIVE
+
+    game = Game(turns=[naming_turn("Ди Каприо")])
+    guess.grade(game, guess.YES)
+    assert game.status == guess.WON
+
+
+def test_several_names_are_read_and_trimmed():
+    step = guess.parse('{"names": ["А", "Б", "В", "Г", "Д"], "reading": "Карты показывают"}')
+    assert step.lead is True
+    assert step.names == ["А", "Б", "В", "Г", "Д"][: guess.MAX_NAMES]
+
+
+def test_a_single_name_sent_as_a_string_is_still_a_name():
+    step = guess.parse('{"names": "Пушкин", "reading": "Звезда зовёт"}')
+    assert step.naming is True
+    assert step.names == ["Пушкин"]
+
+
+def test_the_names_line_reads_like_speech():
+    assert naming_turn("Ди Каприо", "Мэтт Дэймон").names_line == "Ди Каприо или Мэтт Дэймон"
+    assert naming_turn("А", "Б", "В").names_line == "А, Б или В"
+    assert naming_turn("Один").names_line == "Один"

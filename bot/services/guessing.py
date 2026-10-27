@@ -54,12 +54,14 @@ class Guessing:
 
         return Turn(
             question=step.question,
-            guess=step.guess,
+            names=list(step.names),
             card=card.card.id,
             reversed=card.reversed,
             card_answer=answer,
             reading=step.reading,
-            follow_up=guess.needs_follow_up(game) and not step.guessing,
+            # Уточняют вопрос, а не имена: дожимать нечего, если карты
+            # показывают типаж
+            follow_up=guess.needs_follow_up(game) and not step.names,
         )
 
     async def _ask(self, game: Game, card: DrawnCard, answer: str) -> guess.Step:

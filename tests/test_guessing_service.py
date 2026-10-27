@@ -51,13 +51,23 @@ async def test_the_model_sees_the_card_and_its_answer():
 
 
 @pytest.mark.asyncio
-async def test_a_name_comes_back_as_a_guessing_turn():
-    grok = client('{"guess": "Фредди Меркьюри", "reading": "Звезда называет имя"}')
+async def test_a_single_name_comes_back_as_a_naming_turn():
+    grok = client('{"names": ["Фредди Меркьюри"], "reading": "Звезда называет имя"}')
     turn = await Guessing(grok).step(Game())
 
-    assert turn.is_guess is True
-    assert turn.guess == "Фредди Меркьюри"
+    assert turn.is_naming is True
+    assert turn.names == ["Фредди Меркьюри"]
     assert turn.follow_up is False
+
+
+@pytest.mark.asyncio
+async def test_several_names_come_back_as_a_direction():
+    grok = client('{"names": ["Ди Каприо", "Мэтт Дэймон"], "reading": "Карты показывают типаж"}')
+    turn = await Guessing(grok).step(Game())
+
+    assert turn.is_lead is True
+    assert turn.is_naming is False
+    assert turn.names_line == "Ди Каприо или Мэтт Дэймон"
 
 
 @pytest.mark.asyncio
