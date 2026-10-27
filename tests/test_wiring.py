@@ -371,3 +371,19 @@ def test_an_answer_is_delivered_before_it_is_counted():
 
     source = inspect.getsource(handle_admin_order_answer)
     assert source.index("deliver(") < source.index("remember(")
+
+
+def test_the_secret_script_does_not_rotate_by_accident():
+    """Повторный запуск не должен обнулять уже выданный секрет.
+
+    Его к тому времени могли вписать в настройках, и тихая смена сломала бы
+    доступ так, что причина нашлась бы нескоро.
+    """
+    from pathlib import Path
+
+    script = (Path(__file__).resolve().parents[1] / "deploy" / "ops-token.sh").read_text("utf-8")
+
+    assert 'MODE="keep"' in script
+    assert "--new" in script and "--show" in script
+    # Секрет показывается даже когда перезапуск не удался: он уже записан
+    assert script.index('systemctl restart "$SERVICE" 2>/dev/null') < script.index('show "$token"')
