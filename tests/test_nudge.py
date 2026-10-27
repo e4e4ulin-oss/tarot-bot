@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 import pytest
 import pytest_asyncio
@@ -47,7 +47,10 @@ async def add_user(factory, user_id: int, *, days_ago: float = 2, subscribed: bo
     async with factory() as session:
         repo = Repo(session)
         user = await repo.upsert_user(user_id, None, f"Гость {user_id}")
-        user.created_at = datetime.now(UTC) - timedelta(days=days_ago)
+        # Отсчёт от NOW, а не от настоящего «сейчас»: иначе разрыв между
+        # приходом человека и моментом проверки зависит от дня запуска тестов,
+        # и однажды он становится меньше порога молчания
+        user.created_at = NOW - timedelta(days=days_ago)
         if subscribed:
             await repo.set_daily_subscription(user_id, True)
         await session.commit()
