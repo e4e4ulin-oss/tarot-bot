@@ -21,6 +21,7 @@ from typing import Any
 
 from aiogram import Bot
 from aiohttp import web
+from sqlalchemy import select
 
 from .. import analytics, billing, geo, referrals, texts
 from .. import profile as profile_parse
@@ -30,7 +31,7 @@ from ..access import owns
 from ..billing import PAYLOAD_AUTO, PAYLOAD_NATAL
 from ..config import Settings
 from ..db import Repo
-from ..db.models import ORDER_STATUS_LABELS, Order, OrderStatus, ReadingMode
+from ..db.models import ORDER_STATUS_LABELS, Order, OrderStatus, ReadingMode, Tenant
 from ..handlers.author import notify_admin_followup, notify_admin_new_order
 from ..natal import forecast as natal_forecast
 from ..natal import full as natal_full
@@ -1021,6 +1022,27 @@ async def handle_ops_status(request: web.Request) -> web.Response:
 
     async with request.app[SESSIONS]() as session:
         counts = await Repo(session).stats()
+        brands = list((await session.execute(select(Tenant).order_by(Tenant.id))).scalars())
+
+    # Цены живут в базе, а не в коде, и расхождение между выложенной версией и
+    # тем, что на самом деле продаётся, иначе никак не увидеть. Токенов здесь
+    # нет и быть не должно: только признак, настроен ли провайдер
+    tenants = [
+        {
+            "slug": brand.slug,
+            "active": brand.active,
+            "payment_method": brand.payment_method,
+            "provider_ready": bool(brand.payment_provider_token),
+            "stars": {"auto": brand.auto_reading_stars, "natal": brand.natal_reading_stars},
+            "roubles": {"auto": brand.auto_reading_price, "natal": brand.natal_reading_price},
+            "free": {
+                "total": brand.free_auto_readings,
+                "without_daily": brand.free_without_daily,
+                "per_day": brand.free_daily_limit,
+            },
+        }
+        for brand in brands
+    ]
 
     # systemctl отдаёт строки вида «ActiveState=active» — разбираем в словарь
     service = {}
@@ -1037,6 +1059,7 @@ async def handle_ops_status(request: web.Request) -> web.Response:
             "version_error": None if version.ok else version.output.strip()[:200],
             "service": service or {"error": state.output.strip()[:200]},
             "counts": counts,
+            "tenants": tenants,
         }
     )
 

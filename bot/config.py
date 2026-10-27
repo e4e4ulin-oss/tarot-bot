@@ -54,8 +54,11 @@ class Settings(BaseSettings):
     natal_reading_price: int = Field(default=990, alias="NATAL_READING_PRICE")
     # Цены тех же товаров в звёздах Telegram. Отдельные числа, а не пересчёт
     # по курсу: курс звезды к рублю плавает, а цена должна быть ровной.
-    auto_reading_stars: int = Field(default=250, alias="AUTO_READING_STARS")
-    natal_reading_stars: int = Field(default=650, alias="NATAL_READING_STARS")
+    # Кратно пятидесяти: звёзды продаются пакетами от 100 штук, и цена в
+    # половину минимального пакета не оставляет неразменного остатка —
+    # купленная сотня покрывает ровно два расклада
+    auto_reading_stars: int = Field(default=50, alias="AUTO_READING_STARS")
+    natal_reading_stars: int = Field(default=150, alias="NATAL_READING_STARS")
     # Чем принимаем оплату: "stars" — звёзды Telegram, "provider" — рубли
     # через платёжного провайдера. По умолчанию звёзды: им не нужен ни токен,
     # ни одобрение эквайера, и правилам Telegram для цифровых услуг отвечают

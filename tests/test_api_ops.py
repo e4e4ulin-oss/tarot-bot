@@ -13,6 +13,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from bot.api.app import create_app
 from bot.config import Settings
 from bot.db import create_engine, create_session_factory, init_models
+from bot.db.models import Tenant
 from bot.services.server import CommandResult
 
 SECRET = "ops-секрет-достаточной-длины"
@@ -47,6 +48,21 @@ async def make_client(tmp_path, token: str = SECRET, broken: bool = False):
     await init_models(engine)
     factory = create_session_factory(engine)
     settings = Settings(OPS_TOKEN=token)
+
+    # Цены живут у арендатора, а не в коде, поэтому арендатор здесь нужен
+    async with factory() as session:
+        session.add(
+            Tenant(
+                slug="default",
+                title="Таро",
+                bot_token="123:abc",
+                bot_id=123,
+                auto_reading_stars=50,
+                natal_reading_stars=150,
+                payment_provider_token="1:LIVE:секрет",
+            )
+        )
+        await session.commit()
 
     async def tokens() -> dict[int, str]:
         return {1: settings.bot_token}
@@ -106,6 +122,29 @@ async def test_the_status_says_what_is_deployed_and_alive(client):
     assert data["service"]["ActiveState"] == "active"
     # База тоже отвечает — иначе цифр бы не было
     assert "users" in data["counts"]
+
+
+@pytest.mark.asyncio
+async def test_the_status_shows_what_is_actually_being_sold(client):
+    """Цена лежит в базе: по одной версии кода не узнать, почём сейчас продают."""
+    res = await client.get("/api/ops/status", headers=key())
+    brand = (await res.json())["tenants"][0]
+
+    assert brand["slug"] == "default"
+    assert brand["payment_method"] == "stars"
+    assert brand["stars"] == {"auto": 50, "natal": 150}
+    assert brand["free"]["per_day"] == 2
+
+
+@pytest.mark.asyncio
+async def test_the_status_tells_about_the_provider_without_telling_its_token(client):
+    res = await client.get("/api/ops/status", headers=key())
+    body = await res.text()
+
+    assert (await res.json())["tenants"][0]["provider_ready"] is True
+    # Признак — да, сам токен — никогда
+    assert "1:LIVE" not in body
+    assert "123:abc" not in body
 
 
 @pytest.mark.asyncio

@@ -392,13 +392,13 @@ async def test_the_invoice_is_issued_in_stars(client_with_bot):
 
     data = await res.json()
     assert data["link"] == "https://t.me/invoice/test"
-    assert data["price"] == 250
+    assert data["price"] == 50
     assert data["currency"] == "⭐"
 
     invoice = client_with_bot.robot.invoice
     assert invoice["currency"] == "XTR"
-    # Сумма в звёздах — именно 250, а не 25000: копейки тут ни при чём
-    assert [price.amount for price in invoice["prices"]] == [250]
+    # Сумма в звёздах — именно 50, а не 5000: копейки тут ни при чём
+    assert [price.amount for price in invoice["prices"]] == [50]
     assert invoice["provider_token"] == ""
 
 

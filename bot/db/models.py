@@ -344,8 +344,8 @@ class Tenant(Base):
     natal_reading_price: Mapped[int] = mapped_column(Integer, default=990)
     # Те же цены в звёздах и способ оплаты: у каждого бренда свой счёт, и
     # рубли с звёздами он выбирает сам
-    auto_reading_stars: Mapped[int] = mapped_column(Integer, default=250, server_default="250")
-    natal_reading_stars: Mapped[int] = mapped_column(Integer, default=650, server_default="650")
+    auto_reading_stars: Mapped[int] = mapped_column(Integer, default=50, server_default="50")
+    natal_reading_stars: Mapped[int] = mapped_column(Integer, default=150, server_default="150")
     payment_method: Mapped[str] = mapped_column(
         String(16), default="stars", server_default="stars"
     )
