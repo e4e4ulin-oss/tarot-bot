@@ -987,7 +987,15 @@ def ops_allowed(request: web.Request) -> web.Response | None:
         # Не «403», а «нет такого»: о выключенном адресе знать незачем
         return json_error("Не найдено", 404, "not_found")
 
+    # Секрет принимается двумя способами: своим заголовком и обычным Bearer.
+    # Хранилища секретов чаще всего умеют второе, и подгонять их под нас —
+    # лишний шанс ошибиться в настройке, которую потом не видно
     given = request.headers.get("X-Ops-Token", "")
+    if not given:
+        header = request.headers.get("Authorization", "")
+        if header.lower().startswith("bearer "):
+            given = header[len("bearer ") :].strip()
+
     # Сравниваем байтами: compare_digest на строках с кириллицей падает,
     # а секрет вполне может оказаться русским словом
     if not secrets.compare_digest(given.encode(), expected.encode()):

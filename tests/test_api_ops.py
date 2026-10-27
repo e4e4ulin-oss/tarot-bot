@@ -85,6 +85,18 @@ async def test_without_the_secret_the_address_does_not_exist(client):
 
 
 @pytest.mark.asyncio
+async def test_a_bearer_header_works_too(client):
+    """Хранилища секретов обычно умеют Bearer — пусть он и подойдёт."""
+    res = await client.get(
+        "/api/ops/status", headers={"Authorization": f"Bearer {SECRET}"}
+    )
+    assert res.status == 200
+
+    wrong = await client.get("/api/ops/status", headers={"Authorization": "Bearer чужой"})
+    assert wrong.status == 404
+
+
+@pytest.mark.asyncio
 async def test_the_status_says_what_is_deployed_and_alive(client):
     res = await client.get("/api/ops/status", headers=key())
     assert res.status == 200
