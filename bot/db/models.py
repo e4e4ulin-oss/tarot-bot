@@ -231,6 +231,8 @@ class Payment(Base):
     # одного не должна открывать другое
     kind: Mapped[str] = mapped_column(String(32), default="auto_reading", index=True)
     charge_id: Mapped[str | None] = mapped_column(String(128), unique=True)
+    # Возвращённый платёж не открывает ничего: иначе возврат стал бы подарком
+    refunded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, index=True
     )
@@ -340,6 +342,13 @@ class Tenant(Base):
     free_daily_limit: Mapped[int] = mapped_column(Integer, default=2, server_default="2")
     auto_reading_price: Mapped[int] = mapped_column(Integer, default=369)
     natal_reading_price: Mapped[int] = mapped_column(Integer, default=990)
+    # Те же цены в звёздах и способ оплаты: у каждого бренда свой счёт, и
+    # рубли с звёздами он выбирает сам
+    auto_reading_stars: Mapped[int] = mapped_column(Integer, default=250, server_default="250")
+    natal_reading_stars: Mapped[int] = mapped_column(Integer, default=650, server_default="650")
+    payment_method: Mapped[str] = mapped_column(
+        String(16), default="stars", server_default="stars"
+    )
     # Деньги идут на счёт арендатора, поэтому и токен провайдера его
     payment_provider_token: Mapped[str] = mapped_column(String(128), default="")
 

@@ -14,7 +14,7 @@ from aiogram.types import (
 )
 from aiogram.utils.chat_action import ChatActionSender
 
-from .. import analytics, texts
+from .. import analytics, billing, texts
 from ..config import Settings
 from ..db import Repo
 from ..keyboards import (
@@ -184,14 +184,23 @@ async def refuse(message: Message, settings: Settings, decision: reading.Refused
         await message.answer(texts.PAYMENT_NOT_READY.format(author=settings.author_name))
     elif decision.reason == "free_daily_limit":
         # Бесплатные не потеряны, а перенесены: об этом и говорим
+        deal = billing.terms(settings)
+        if deal is None:
+            await message.answer(
+                texts.FREE_DAILY_LIMIT_ONLY.format(
+                    limit=decision.limit, left=decision.free_left
+                ),
+                reply_markup=after_reading_menu(settings.author_name),
+            )
+            return
         await message.answer(
             texts.FREE_DAILY_LIMIT.format(
                 limit=decision.limit,
                 left=decision.free_left,
-                price=settings.auto_reading_price,
-                currency=settings.author_currency,
+                price=deal.price,
+                currency=deal.unit,
             ),
-            reply_markup=paywall_menu(settings.auto_reading_price, settings.author_currency),
+            reply_markup=paywall_menu(deal.price, deal.unit),
         )
     elif decision.reason == "daily_limit":
         await message.answer(
@@ -199,13 +208,17 @@ async def refuse(message: Message, settings: Settings, decision: reading.Refused
             reply_markup=after_reading_menu(settings.author_name),
         )
     else:
+        deal = billing.terms(settings)
+        if deal is None:
+            await message.answer(texts.PAYMENT_NOT_READY.format(author=settings.author_name))
+            return
         await message.answer(
             texts.FREE_SPENT.format(
                 total=settings.free_auto_readings,
-                price=settings.auto_reading_price,
-                currency=settings.author_currency,
+                price=deal.price,
+                currency=deal.unit,
             ),
-            reply_markup=paywall_menu(settings.auto_reading_price, settings.author_currency),
+            reply_markup=paywall_menu(deal.price, deal.unit),
         )
 
 

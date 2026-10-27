@@ -52,6 +52,15 @@ class Settings(BaseSettings):
     # Подробный разбор натальной карты: пишется один раз и надолго,
     # поэтому и стоит иначе, чем расклад
     natal_reading_price: int = Field(default=990, alias="NATAL_READING_PRICE")
+    # Цены тех же товаров в звёздах Telegram. Отдельные числа, а не пересчёт
+    # по курсу: курс звезды к рублю плавает, а цена должна быть ровной.
+    auto_reading_stars: int = Field(default=250, alias="AUTO_READING_STARS")
+    natal_reading_stars: int = Field(default=650, alias="NATAL_READING_STARS")
+    # Чем принимаем оплату: "stars" — звёзды Telegram, "provider" — рубли
+    # через платёжного провайдера. По умолчанию звёзды: им не нужен ни токен,
+    # ни одобрение эквайера, и правилам Telegram для цифровых услуг отвечают
+    # именно они. Провайдеру нужен токен, и без него оплата не предлагается.
+    payment_method: str = Field(default="stars", alias="PAYMENT_METHOD")
     # Токен платёжного провайдера от BotFather. Пусто — оплата не предлагается,
     # и бот честно говорит, что платные расклады пока не подключены.
     payment_provider_token: str = Field(default="", alias="PAYMENT_PROVIDER_TOKEN")

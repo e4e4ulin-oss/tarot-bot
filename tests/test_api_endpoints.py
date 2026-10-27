@@ -8,7 +8,7 @@ import pytest
 import pytest_asyncio
 from aiohttp.test_utils import TestClient, TestServer
 
-from bot.api.app import SESSIONS, create_app
+from bot.api.app import BRAND, SESSIONS, create_app
 from bot.config import Settings
 from bot.db import create_engine, create_session_factory, init_models
 from tests.test_api_auth import make_init_data
@@ -383,11 +383,38 @@ async def test_foreign_order_cannot_be_cancelled(client):
 
 
 @pytest.mark.asyncio
-async def test_invoice_says_when_payments_are_not_set_up(client):
-    res = await client.post("/api/invoice", headers=auth(user_id=47), json={"kind": "auto"})
-    # Токена продавца в тестовых настройках нет — и приложение должно это объяснить
-    assert res.status == 409
-    assert (await res.json())["error"] == "payment_not_ready"
+async def test_the_invoice_is_issued_in_stars(client_with_bot):
+    """Звёздам не нужен ни провайдер, ни его токен — и счёт считается штуками."""
+    res = await client_with_bot.post(
+        "/api/invoice", headers=auth(user_id=47), json={"kind": "auto"}
+    )
+    assert res.status == 200
+
+    data = await res.json()
+    assert data["link"] == "https://t.me/invoice/test"
+    assert data["price"] == 250
+    assert data["currency"] == "⭐"
+
+    invoice = client_with_bot.robot.invoice
+    assert invoice["currency"] == "XTR"
+    # Сумма в звёздах — именно 250, а не 25000: копейки тут ни при чём
+    assert [price.amount for price in invoice["prices"]] == [250]
+    assert invoice["provider_token"] == ""
+
+
+@pytest.mark.asyncio
+async def test_invoice_says_when_payments_are_not_set_up(client_with_bot):
+    """Выбран провайдер, токена нет — платить нечем, и приложение это объясняет."""
+    brand = client_with_bot.app[BRAND]
+    brand.payment_method = "provider"
+    try:
+        res = await client_with_bot.post(
+            "/api/invoice", headers=auth(user_id=47), json={"kind": "auto"}
+        )
+        assert res.status == 409
+        assert (await res.json())["error"] == "payment_not_ready"
+    finally:
+        brand.payment_method = "stars"
 
 
 class FakeBot:
@@ -403,6 +430,7 @@ class FakeBot:
 
     def __init__(self) -> None:
         self.sent: list[tuple[int, str]] = []
+        self.invoice: dict | None = None
 
     async def me(self) -> Me:
         return self.Me()
@@ -410,6 +438,10 @@ class FakeBot:
     async def send_message(self, chat_id, text, **kwargs):
         self.sent.append((chat_id, text))
         return None
+
+    async def create_invoice_link(self, **kwargs):
+        self.invoice = kwargs
+        return "https://t.me/invoice/test"
 
 
 @pytest_asyncio.fixture
@@ -843,7 +875,8 @@ async def test_the_stats_add_up(client_with_bot):
     assert data["days"] == 0
     assert [step["key"] for step in data["funnel"]][0] == "start"
     assert "users" in data["totals"] and "daily_subscribers" in data["totals"]
-    assert data["paid"]["currency"]
+    # Сумма приходит строкой со знаком валюты: рубли и звёзды не складываются
+    assert data["paid"]["money"]
 
 
 @pytest.mark.asyncio

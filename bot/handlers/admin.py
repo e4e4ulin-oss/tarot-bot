@@ -11,7 +11,7 @@ from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from .. import analytics, texts
+from .. import analytics, billing, texts
 from ..config import Settings
 from ..db import Order, OrderStatus, Repo
 from ..filters import IsAdmin
@@ -272,8 +272,7 @@ async def cmd_stats(
             orders_by_tier=tiers_block,
             daily_subscribers=await repo.count_daily_subscribers(),
             paid_count=paid["count"],
-            paid_total=paid["total"],
-            currency=settings.author_currency,
+            paid_money=billing.money(paid["totals"], settings),
             **await repo.stats(),
         )
     )
@@ -408,6 +407,61 @@ async def cmd_restart(message: Message, server: ServerOps) -> None:
     result = await server.restart()
     if not result.ok:
         await message.answer(texts.SERVER_UNAVAILABLE.format(output=_tail(result.output)))
+
+
+@router.message(Command("refund"))
+async def cmd_refund(
+    message: Message, command: CommandObject, repo: Repo, settings: Settings, bot: Bot
+) -> None:
+    """Вернуть оплату звёздами. Рубли возвращаются у провайдера, не здесь.
+
+    Возврат — обязанность продавца цифровых услуг, и просить за ним человека
+    лезть в чужой интерфейс неправильно. Код платежа берётся из списка, чтобы
+    его не пришлось искать по переписке.
+    """
+    if not command.args:
+        rows = await repo.last_payments(10)
+        if not rows:
+            await message.answer(texts.ADMIN_REFUND_EMPTY)
+            return
+        listing = "\n\n".join(
+            texts.ADMIN_REFUND_ROW.format(
+                money=billing.money({payment.currency: payment.amount}, settings),
+                kind="разбор карты" if payment.kind == "natal_reading" else "расклад",
+                date=fmt_date(payment.created_at),
+                charge=payment.charge_id or "—",
+            )
+            for payment in rows
+        )
+        await message.answer(texts.ADMIN_REFUND_USAGE.format(rows=listing))
+        return
+
+    payment = await repo.payment_by_charge(command.args.strip())
+    if payment is None:
+        await message.answer(texts.ADMIN_REFUND_UNKNOWN)
+        return
+    if payment.refunded_at is not None:
+        await message.answer(texts.ADMIN_REFUND_ALREADY.format(date=fmt_date(payment.refunded_at)))
+        return
+    if payment.currency != billing.STARS_CURRENCY:
+        await message.answer(texts.ADMIN_REFUND_NOT_STARS.format(currency=payment.currency))
+        return
+
+    try:
+        await bot.refund_star_payment(
+            user_id=payment.user_id, telegram_payment_charge_id=payment.charge_id
+        )
+    except TelegramAPIError as exc:
+        logger.warning("Возврат не прошёл: %s", exc)
+        await message.answer(texts.ADMIN_REFUND_FAILED.format(error=exc.message))
+        return
+
+    await repo.mark_refunded(payment)
+    await message.answer(
+        texts.ADMIN_REFUND_DONE.format(
+            money=billing.money({payment.currency: payment.amount}, settings)
+        )
+    )
 
 
 @router.message(Command("tenants"))

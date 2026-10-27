@@ -763,7 +763,7 @@
         <div class="rows" style="margin-bottom:14px">${funnel}</div>
         ${tiers ? `<h3 style="font-family:var(--serif);font-weight:500;margin:0 2px 8px">Заявки по уровням</h3><div class="rows" style="margin-bottom:14px">${tiers}</div>` : ""}
         <div class="rows">
-          <div class="row"><span>Оплачено раскладов</span><b>${data.paid.count} на ${data.paid.total} ${esc(data.paid.currency)}</b></div>
+          <div class="row"><span>Оплачено раскладов</span><b>${data.paid.count} на ${esc(data.paid.money)}</b></div>
           <div class="row"><span>Людей всего</span><b>${t.users}</b></div>
           <div class="row"><span>Раскладов всего</span><b>${t.readings}</b></div>
           <div class="row"><span>Заявок</span><b>${t.orders} (открытых ${t.open_orders})</b></div>
@@ -1194,6 +1194,11 @@
   }
 
   function refusal(data) {
+    // Цена на кнопке — в той валюте, которой платят: звёзды и рубли
+    // приходят из /api/config вместе, и выбирать между ними здесь нечего
+    const cost = config && config.auto_price
+      ? ` — ${config.auto_price} ${config.pay_unit || ""}`.trimEnd()
+      : "";
     const texts = {
       needs_daily: {
         title: "Включите карту дня",
@@ -1203,7 +1208,7 @@
       needs_payment: {
         title: "Бесплатные закончились",
         body: "Вы использовали все бесплатные расклады. Следующий — платный.",
-        action: "Оплатить расклад",
+        action: `Оплатить расклад${cost}`,
         pay: true,
       },
       payment_not_ready: {
@@ -1216,7 +1221,7 @@
         // человек должен понять, упёршись в потолок
         title: "На сегодня хватит",
         body: `Бесплатных раскладов не больше ${data.limit} в день. Оставшиеся ${data.free_left} никуда не денутся — они снова ваши завтра.`,
-        action: "Разложить сейчас — платно",
+        action: `Разложить сейчас${cost || " — платно"}`,
         pay: true,
       },
       daily_limit: {

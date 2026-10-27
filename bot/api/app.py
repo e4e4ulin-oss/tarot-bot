@@ -20,19 +20,18 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from aiogram import Bot
-from aiogram.types import LabeledPrice
 from aiohttp import web
 
-from .. import analytics, geo, referrals, texts
+from .. import analytics, billing, geo, referrals, texts
 from .. import profile as profile_parse
 from .. import promo as promo_rules
 from ..access import check as check_access
 from ..access import owns
+from ..billing import PAYLOAD_AUTO, PAYLOAD_NATAL
 from ..config import Settings
 from ..db import Repo
 from ..db.models import ORDER_STATUS_LABELS, Order, OrderStatus, ReadingMode
 from ..handlers.author import notify_admin_followup, notify_admin_new_order
-from ..handlers.payments import PAYLOAD_AUTO, PAYLOAD_NATAL
 from ..natal import forecast as natal_forecast
 from ..natal import full as natal_full
 from ..natal import timeline as natal_timeline
@@ -167,6 +166,8 @@ async def handle_health(request: web.Request) -> web.Response:
 async def handle_config(request: web.Request) -> web.Response:
     """Витрина до входа: чей это бренд, какие раскладки и почём разборы."""
     settings: Settings = request.app[BRAND]
+    auto = billing.terms(settings, PAYLOAD_AUTO)
+    natal = billing.terms(settings, PAYLOAD_NATAL)
     return json_ok(
         {
             "author": settings.author_name,
@@ -185,8 +186,12 @@ async def handle_config(request: web.Request) -> web.Response:
                 }
                 for tier in author_tiers(settings)
             ],
-            "auto_price": settings.auto_reading_price,
-            "natal_price": settings.natal_reading_price,
+            # Цены — в той валюте, которой сейчас платят: показывать рубли и
+            # списывать звёзды было бы обманом
+            "auto_price": auto.price if auto else settings.auto_reading_price,
+            "natal_price": natal.price if natal else settings.natal_reading_price,
+            "pay_unit": auto.unit if auto else settings.author_currency,
+            "pay_method": auto.method if auto else None,
             "free_readings": settings.free_auto_readings,
             "free_needs_daily": settings.free_needs_daily,
             "free_without_daily": settings.free_without_daily,
@@ -566,13 +571,15 @@ async def handle_natal_get(request: web.Request) -> web.Response:
     if written is not None:
         return json_ok({"ready": True, "text": written.interpretation, "written": True})
 
+    deal = billing.terms(settings, PAYLOAD_NATAL)
+
     return json_ok(
         {
             "ready": True,
             "written": False,
             "paid": paid is not None or settings.is_admin(identity.user.id),
-            "price": settings.natal_reading_price,
-            "currency": settings.author_currency,
+            "price": deal.price if deal else settings.natal_reading_price,
+            "currency": deal.unit if deal else settings.author_currency,
         }
     )
 
@@ -1254,7 +1261,11 @@ async def handle_admin_stats(request: web.Request) -> web.Response:
                 }
                 for key, count in by_tier.items()
             ],
-            "paid": {**paid, "currency": settings.author_currency},
+            # Рубли и звёзды показываются рядом, а не одной суммой
+            "paid": {
+                "count": paid["count"],
+                "money": billing.money(paid["totals"], settings),
+            },
             "totals": {**totals, "daily_subscribers": subscribers},
         }
     )
@@ -1350,33 +1361,22 @@ async def handle_invoice(request: web.Request) -> web.Response:
     settings: Settings = request[BRAND]
     bots: BotProvider = request.app[BOTS]
 
-    if not settings.payment_provider_token:
-        return json_error("Автор ещё не подключил приём оплаты", 409, "payment_not_ready")
-
     try:
         payload = await request.json()
     except Exception:
         payload = {}
 
     natal = (payload.get("kind") or "auto") == "natal"
-    price = settings.natal_reading_price if natal else settings.auto_reading_price
-    title = texts.INVOICE_NATAL_TITLE if natal else texts.INVOICE_TITLE
-    description = texts.INVOICE_NATAL_DESCRIPTION if natal else texts.INVOICE_DESCRIPTION
+    deal = billing.terms(settings, PAYLOAD_NATAL if natal else PAYLOAD_AUTO)
+    if deal is None:
+        return json_error("Автор ещё не подключил приём оплаты", 409, "payment_not_ready")
 
     bot = await bots(identity.tenant_id)
     if bot is None:
         return json_error("Бот недоступен", 503, "no_bot")
 
-    link = await bot.create_invoice_link(
-        title=title,
-        description=description,
-        payload=PAYLOAD_NATAL if natal else PAYLOAD_AUTO,
-        provider_token=settings.payment_provider_token,
-        currency=settings.payment_currency,
-        # Telegram считает сумму в копейках
-        prices=[LabeledPrice(label=title, amount=price * 100)],
-    )
-    return json_ok({"link": link, "price": price, "currency": settings.payment_currency})
+    link = await bot.create_invoice_link(**billing.invoice_kwargs(settings, deal))
+    return json_ok({"link": link, "price": deal.price, "currency": deal.unit})
 
 
 @dataclass

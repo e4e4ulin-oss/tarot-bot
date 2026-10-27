@@ -102,14 +102,20 @@ async def test_the_one_who_paid_hits_no_ceiling(repo):
 @pytest.mark.asyncio
 async def test_without_a_way_to_pay_the_reason_says_so(repo):
     """«Заплатите» без подключённого приёма денег — тупик, и он называется иначе."""
-    settings = make_settings(FREE_AUTO_READINGS=0)
+    settings = make_settings(FREE_AUTO_READINGS=0, PAYMENT_METHOD="provider")
     decision = await ask(repo, settings)
 
     assert isinstance(decision, reading.Refused)
     assert decision.reason == "payment_not_ready"
 
-    paid = make_settings(FREE_AUTO_READINGS=0, PAYMENT_PROVIDER_TOKEN="test:token")
+    paid = make_settings(
+        FREE_AUTO_READINGS=0, PAYMENT_METHOD="provider", PAYMENT_PROVIDER_TOKEN="test:token"
+    )
     assert (await ask(repo, paid)).reason == "needs_payment"
+
+    # Звёздам провайдер не нужен: платить есть чем всегда
+    stars = make_settings(FREE_AUTO_READINGS=0, PAYMENT_METHOD="stars")
+    assert (await ask(repo, stars)).reason == "needs_payment"
 
 
 @pytest.mark.asyncio

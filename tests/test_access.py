@@ -118,7 +118,7 @@ async def test_payment_opens_exactly_one_reading(repo):
 async def test_payments_are_counted_for_the_owner(repo):
     await repo.add_payment(USER, 369, "RUB", "charge-2")
     await repo.add_payment(USER, 369, "RUB", "charge-3")
-    assert await repo.payments_summary() == {"count": 2, "total": 738}
+    assert await repo.payments_summary() == {"count": 2, "totals": {"RUB": 738}}
 
 
 @pytest.mark.asyncio

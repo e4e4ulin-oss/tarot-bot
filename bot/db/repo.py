@@ -79,24 +79,53 @@ class Repo:
                 Payment.user_id == user_id,
                 Payment.kind == kind,
                 Payment.spent_at.is_(None),
+                Payment.refunded_at.is_(None),
             )
             .order_by(Payment.created_at)
             .limit(1)
         )
         return result.scalar_one_or_none()
 
+    async def payment_by_charge(self, charge_id: str) -> Payment | None:
+        result = await self.session.execute(
+            select(Payment).where(
+                Payment.tenant_id == self.tenant_id, Payment.charge_id == charge_id
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def last_payments(self, limit: int = 10) -> list[Payment]:
+        result = await self.session.execute(
+            select(Payment)
+            .where(Payment.tenant_id == self.tenant_id)
+            .order_by(Payment.created_at.desc(), Payment.id.desc())
+            .limit(limit)
+        )
+        return list(result.scalars())
+
+    async def mark_refunded(self, payment: Payment) -> None:
+        payment.refunded_at = utcnow()
+        await self.session.commit()
+
     async def spend_payment(self, payment: Payment) -> None:
         payment.spent_at = utcnow()
         await self.session.commit()
 
-    async def payments_summary(self, since: datetime | None = None) -> dict[str, int]:
-        query = select(func.count(), func.coalesce(func.sum(Payment.amount), 0)).where(
-            Payment.tenant_id == self.tenant_id
-        )
+    async def payments_summary(self, since: datetime | None = None) -> dict[str, object]:
+        """Сколько платежей и на какие суммы — отдельно по каждой валюте.
+
+        Рубли и звёзды в одно число не складываются, поэтому итог приходит
+        словарём: валюта → сумма.
+        """
+        query = select(
+            Payment.currency, func.count(), func.coalesce(func.sum(Payment.amount), 0)
+        ).where(Payment.tenant_id == self.tenant_id, Payment.refunded_at.is_(None))
         if since is not None:
             query = query.where(Payment.created_at >= since)
-        count, total = (await self.session.execute(query)).one()
-        return {"count": int(count), "total": int(total)}
+        rows = (await self.session.execute(query.group_by(Payment.currency))).all()
+
+        totals = {str(currency or "RUB"): int(total) for currency, _, total in rows}
+        return {"count": sum(int(count) for _, count, _ in rows), "totals": totals}
 
     # --- Пользователи ---------------------------------------------------
     async def upsert_user(

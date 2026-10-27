@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .. import analytics, referrals
+from .. import analytics, billing, referrals
 from ..access import Access
 from ..access import check as check_access
 from ..access import spend as spend_access
@@ -74,7 +74,7 @@ async def start(
     if not access.allowed:
         await repo.log_event(user_id, analytics.PAYWALL, access.reason)
         reason = access.reason
-        if reason == "needs_payment" and not settings.payment_provider_token:
+        if reason == "needs_payment" and billing.terms(settings) is None:
             # Платить нечем: продавец не подключил приём денег
             reason = "payment_not_ready"
         return Refused(reason, access.free_left)

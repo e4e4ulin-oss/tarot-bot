@@ -36,6 +36,9 @@ def overrides(tenant: Tenant) -> dict[str, object]:
         "free_daily_limit": tenant.free_daily_limit,
         "auto_reading_price": tenant.auto_reading_price,
         "natal_reading_price": tenant.natal_reading_price,
+        "auto_reading_stars": tenant.auto_reading_stars,
+        "natal_reading_stars": tenant.natal_reading_stars,
+        "payment_method": tenant.payment_method,
         "payment_provider_token": tenant.payment_provider_token,
         "miniapp_url": tenant.miniapp_url or Settings.model_fields["miniapp_url"].default,
     }
@@ -84,6 +87,9 @@ async def ensure_default(session: AsyncSession, settings: Settings) -> Tenant | 
         free_needs_daily=settings.free_needs_daily,
         auto_reading_price=settings.auto_reading_price,
         natal_reading_price=settings.natal_reading_price,
+        auto_reading_stars=settings.auto_reading_stars,
+        natal_reading_stars=settings.natal_reading_stars,
+        payment_method=settings.payment_method,
         payment_provider_token=settings.payment_provider_token,
         miniapp_url=settings.miniapp_url,
     )

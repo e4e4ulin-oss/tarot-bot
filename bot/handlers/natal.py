@@ -16,7 +16,7 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.chat_action import ChatActionSender
 
-from .. import texts
+from .. import billing, texts
 from ..config import Settings
 from ..db import Repo
 from ..db.models import ReadingMode
@@ -34,6 +34,21 @@ router = Router(name="natal")
 
 def free_for(settings: Settings, user_id: int) -> bool:
     return settings.is_admin(user_id) or user_id == settings.admin_chat_id
+
+
+async def price_offer(message: Message, settings: Settings) -> None:
+    """Предложение разбора с ценой — в той валюте, которой сейчас платят."""
+    deal = billing.terms(settings, PAYLOAD_NATAL)
+    if deal is None:
+        await message.answer(
+            texts.NATAL_NOT_FOR_SALE.format(author=settings.author_name),
+            reply_markup=back_to_menu(),
+        )
+        return
+    await message.answer(
+        texts.NATAL_OFFER.format(price=deal.price, currency=deal.unit),
+        reply_markup=natal_menu(deal.price, deal.unit),
+    )
 
 
 @router.message(Command("natal"))
@@ -61,12 +76,7 @@ async def offer(message: Message, repo: Repo, settings: Settings, user_id: int) 
             await message.answer(chunk)
         return
 
-    await message.answer(
-        texts.NATAL_OFFER.format(
-            price=settings.natal_reading_price, currency=settings.author_currency
-        ),
-        reply_markup=natal_menu(settings.natal_reading_price, settings.author_currency),
-    )
+    await price_offer(message, settings)
 
 
 @router.callback_query(F.data == "natal:buy")
@@ -110,12 +120,7 @@ async def write(
 
     paid = await repo.unspent_payment(user_id, PAYLOAD_NATAL)
     if paid is None and not free_for(settings, user_id):
-        await message.answer(
-            texts.NATAL_OFFER.format(
-                price=settings.natal_reading_price, currency=settings.author_currency
-            ),
-            reply_markup=natal_menu(settings.natal_reading_price, settings.author_currency),
-        )
+        await price_offer(message, settings)
         return
 
     status = await message.answer(texts.NATAL_WRITING)

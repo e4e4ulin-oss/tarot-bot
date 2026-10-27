@@ -131,6 +131,10 @@ async def app(tmp_path_factory):
         FREE_AUTO_READINGS=50,
         FREE_NEEDS_DAILY=False,
         DAILY_AUTO_LIMIT=5,
+        # Эти сценарии про рублёвый путь: цена показывается только там, где
+        # товар можно купить, значит провайдер должен быть настроен
+        PAYMENT_METHOD="provider",
+        PAYMENT_PROVIDER_TOKEN="1:TEST:flow",
     )
     engine = create_engine(settings.database_url)
     await init_models(engine)
