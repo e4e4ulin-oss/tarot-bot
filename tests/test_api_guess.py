@@ -380,7 +380,7 @@ async def test_a_lost_paid_party_gives_the_stars_back(make_client):
     data = await (await lose_the_party(client)).json()
 
     assert data["game"]["status"] == guess.LOST
-    assert data["refund"] == {"amount": 100, "unit": "⭐"}
+    assert data["game"]["refund"] == {"amount": 100, "unit": "⭐"}
     assert client.robot.refunds == [(PLAYER, "pay-1")]
 
     async with client.sessions() as session:
@@ -398,7 +398,7 @@ async def test_a_won_party_keeps_the_stars(make_client):
     ).json()
 
     assert data["game"]["status"] == guess.WON
-    assert data["refund"] is None
+    assert "refund" not in data["game"]
     assert client.robot.refunds == []
 
 
@@ -410,7 +410,7 @@ async def test_a_free_party_has_nothing_to_give_back(make_client):
     data = await (await lose_the_party(client)).json()
 
     assert data["game"]["status"] == guess.LOST
-    assert data["refund"] is None
+    assert "refund" not in data["game"]
     assert client.robot.refunds == []
 
 
@@ -423,7 +423,7 @@ async def test_the_guarantee_runs_out_after_the_set_number(make_client):
     data = await (await lose_the_party(client)).json()
 
     assert data["game"]["status"] == guess.LOST
-    assert data["refund"] is None
+    assert "refund" not in data["game"]
     assert client.robot.refunds == []
 
 
@@ -436,7 +436,7 @@ async def test_a_refusal_from_telegram_does_not_break_the_ending(make_client):
     assert res.status == 200
     data = await res.json()
     assert data["game"]["status"] == guess.LOST
-    assert data["refund"] is None
+    assert "refund" not in data["game"]
 
 
 @pytest.mark.asyncio
@@ -469,5 +469,16 @@ async def test_the_third_loss_in_a_row_is_not_paid_back(make_client):
     data = await (await lose_the_party(client)).json()
 
     assert data["game"]["status"] == guess.LOST
-    assert data["refund"] is None
+    assert "refund" not in data["game"]
     assert client.robot.refunds == []
+
+
+@pytest.mark.asyncio
+async def test_the_refund_is_still_there_when_the_app_is_reopened(make_client):
+    """Закрыл приложение сразу после проигрыша — всё равно должен узнать."""
+    client = await make_client(FakeGuessing())
+    await paid_party(client, None)
+    await lose_the_party(client)
+
+    state = await (await client.get("/api/guess", headers=auth())).json()
+    assert state["game"]["refund"] == {"amount": 100, "unit": "⭐"}

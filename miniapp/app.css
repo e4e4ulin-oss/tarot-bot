@@ -845,3 +845,15 @@ html.fullscreen .topbar {
 html.fullscreen .dclose {
   top: calc(10px + var(--sat));
 }
+
+/* Четыре ответа в столбик уводят кнопки под панель вкладок: партия идёт
+   быстро, и тянуться до «Не знаю» через прокрутку неудобно */
+#guess-answers {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+#guess-answers .btn {
+  margin: 0;
+}

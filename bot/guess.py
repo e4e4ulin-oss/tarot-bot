@@ -161,6 +161,10 @@ class Game:
     missed: list[str] = field(default_factory=list)  # имена, названные мимо
     status: str = ACTIVE
     secret: str | None = None  # кого загадали, если человек рассказал
+    # Возврат за проигранную платную партию. Лежит здесь, а не только в
+    # ответе на последнюю оценку: закрыл приложение сразу после проигрыша —
+    # и человек не узнал бы, что звёзды вернулись
+    refund: dict | None = None
 
     @property
     def asked(self) -> int:
@@ -475,6 +479,7 @@ def game_json(game: Game) -> dict:
         "missed": list(game.missed),
         "status": game.status,
         "secret": game.secret,
+        "refund": game.refund,
     }
 
 
@@ -485,6 +490,7 @@ def game_of(data: dict | None) -> Game:
         missed=[str(name) for name in (data.get("missed") or [])],
         status=str(data.get("status") or ACTIVE),
         secret=data.get("secret") or None,
+        refund=data.get("refund") or None,
     )
 
 

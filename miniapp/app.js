@@ -1063,6 +1063,267 @@
     return `<p class="note" style="margin:0 0 14px">${esc(line.replace(/\s+/g, " "))}</p>`;
   }
 
+  /* --- партия: карты читают задуманного ----------------------------------
+     Не расклад, а игра: человек загадывает известного, карты задают вопросы
+     и сами же на них отвечают, а он говорит, попали ли. Живёт на вкладке
+     раскладов отдельной карточкой, чтобы не плодить шестую вкладку. */
+
+  const GUESS_LABELS = { yes: "Да", no: "Нет", maybe: "Возможно", unknown: "Не знаю" };
+
+  function guessEntry() {
+    return `
+      <div class="card tap offer" id="guess-go">
+        <h3>Карты читают задуманного</h3>
+        <p>Загадайте известного человека — живого, умершего или выдуманного.
+           Карты будут спрашивать и отвечать сами, а вы скажете, попали ли они.</p>
+      </div>`;
+  }
+
+  async function guessView() {
+    const body = $("#spread-body");
+    body.innerHTML = `<p class="waiting">Смотрю, что было…</p>`;
+    try {
+      const data = await api("guess");
+      guessRender(data.game, data.offer);
+    } catch (err) {
+      fail(body, err);
+    }
+  }
+
+  function guessRender(game, offer) {
+    const body = $("#spread-body");
+    const head = backLink("К раскладкам");
+
+    if (game && game.status !== "active") {
+      body.innerHTML = head + guessEnd(game);
+    } else if (game && game.turn) {
+      body.innerHTML = head + guessTurn(game);
+    } else {
+      body.innerHTML = head + guessOffer(offer);
+    }
+
+    $("#flow-back").addEventListener("click", () => {
+      tap();
+      spreadList();
+    });
+    bindGuess(game, offer);
+  }
+
+  function guessOffer(offer) {
+    if (!offer) return `<div class="card"><p>Партия сейчас недоступна.</p></div>`;
+
+    if (offer.needs_profile) {
+      return `
+        <div class="card">
+          <h3>Сначала о вас</h3>
+          <p>Карты читают точнее, когда знают, кто спрашивает: люди загадывают
+             своих — ровесников, свою страну. Заполните дату рождения и город,
+             и первая партия ваша.</p>
+        </div>
+        <button class="btn" id="guess-profile">Заполнить данные</button>`;
+    }
+
+    const free = offer.free_left === null || offer.free_left > 0 || offer.paid;
+    const price = `${offer.price} ${esc(offer.unit || "")}`.trim();
+    return `
+      <div class="card">
+        <h3>Как это устроено</h3>
+        <p>Вы загадываете известного человека и никому его не называете.
+           Карты задают вопрос, сами на него отвечают — а вы говорите, права
+           ли карта. Через несколько ходов они покажут, на кого это похоже,
+           а под конец назовут имя.</p>
+      </div>
+      ${free
+        ? `<p class="note">${offer.paid ? "Партия оплачена." : "Первая партия — бесплатно."}</p>`
+        : `<p class="note">Партия — ${price}.</p>`}
+      <button class="btn" id="guess-start">${free ? "Загадал, начинаем" : `Оплатить ${price}`}</button>
+      <p class="note" id="guess-msg"></p>`;
+  }
+
+  function guessTurn(game) {
+    const turn = game.turn;
+    const card = turn.card;
+    const ask =
+      turn.kind === "name"
+        ? "Это он?"
+        : turn.kind === "lead"
+          ? "Мы в нужном русле?"
+          : "Карта права?";
+
+    const title =
+      turn.kind === "question"
+        ? esc(turn.question)
+        : turn.kind === "lead"
+          ? `Кто-то вроде: ${esc(turn.names_line)}`
+          : `Карты называют: ${esc(turn.names_line)}`;
+
+    return `
+      <p class="note">Ход ${game.asked} · осталось ${game.left}</p>
+      <h3 style="font-family:var(--serif);font-weight:500;font-size:22px;margin:0 0 10px">${title}</h3>
+      <div class="deal" style="grid-template-columns:minmax(0,118px);justify-content:center;margin-bottom:10px">
+        <div class="slot${card.reversed ? " rev" : ""}">
+          <img src="${esc(card.image)}" alt="${esc(card.name)}" loading="lazy">
+          <b>${esc(card.name)}</b>
+        </div>
+      </div>
+      <div class="card"><p>${esc(turn.reading)}</p></div>
+      <p class="note">${ask}</p>
+      <div id="guess-answers">
+        ${turn.options
+          .map(
+            (key) =>
+              `<button class="btn${key === "yes" ? "" : " ghost"}" data-verdict="${esc(key)}">${esc(
+                GUESS_LABELS[key] || key
+              )}</button>`
+          )
+          .join("")}
+      </div>
+      <p class="note" id="guess-msg"></p>`;
+  }
+
+  function guessEnd(game) {
+    const won = game.status === "won";
+    const named = game.history.filter((t) => t.kind === "name");
+    const last = named.length ? named[named.length - 1].names_line : "";
+
+    if (won) {
+      return `
+        <div class="card">
+          <h3>Карты назвали верно</h3>
+          <p>${esc(last)} — за ${game.asked} ${plural(game.asked, "ход", "хода", "ходов")}.</p>
+        </div>
+        <button class="btn" id="guess-again">Сыграть ещё</button>
+        <p class="note" id="guess-msg"></p>`;
+    }
+
+    return `
+      <div class="card">
+        <h3>Карты сдались</h3>
+        <p>Имя не далось: пробовали ${esc(game.missed.join(", ")) || "по-разному"}.</p>
+      </div>
+      ${game.refund
+        ? `<div class="card"><p>Карты не справились — ${game.refund.amount} ${esc(
+            game.refund.unit
+          )} вернулись вам.</p></div>`
+        : ""}
+      ${game.secret
+        ? `<p class="note">Вы загадали: ${esc(game.secret)}.</p>`
+        : `<p class="note">Кого вы загадали? Карты это запомнят.</p>
+           <input class="field" id="guess-secret" maxlength="64" placeholder="Имя">
+           <button class="btn ghost" id="guess-tell">Рассказать</button>`}
+      <button class="btn" id="guess-again">Сыграть ещё</button>
+      <p class="note" id="guess-msg"></p>`;
+  }
+
+  function bindGuess(game, offer) {
+    const profile = $("#guess-profile");
+    if (profile) {
+      profile.addEventListener("click", () => {
+        tap();
+        show("profile");
+        profileView("edit");
+      });
+    }
+
+    const start = $("#guess-start");
+    if (start) {
+      start.addEventListener("click", async () => {
+        start.disabled = true;
+        tap("medium");
+        const free = offer && (offer.free_left === null || offer.free_left > 0 || offer.paid);
+        if (!free) {
+          await payForGuess(start);
+          return;
+        }
+        await startGuess(start);
+      });
+    }
+
+    const again = $("#guess-again");
+    if (again) {
+      again.addEventListener("click", () => {
+        tap();
+        guessView();
+      });
+    }
+
+    const answers = $("#guess-answers");
+    if (answers) {
+      answers.querySelectorAll("[data-verdict]").forEach((node) =>
+        node.addEventListener("click", async () => {
+          answers.querySelectorAll("button").forEach((b) => (b.disabled = true));
+          tap("medium");
+          try {
+            const data = await api("guess/answer", {
+              method: "POST",
+              body: JSON.stringify({ verdict: node.dataset.verdict }),
+            });
+            guessRender(data.game, null);
+          } catch (err) {
+            $("#guess-msg").textContent = err.message;
+            answers.querySelectorAll("button").forEach((b) => (b.disabled = false));
+          }
+        })
+      );
+    }
+
+    const tell = $("#guess-tell");
+    if (tell) {
+      tell.addEventListener("click", async () => {
+        const name = ($("#guess-secret").value || "").trim();
+        if (!name) return;
+        tell.disabled = true;
+        tap();
+        try {
+          const data = await api("guess/secret", {
+            method: "POST",
+            body: JSON.stringify({ name }),
+          });
+          guessRender(data.game, null);
+        } catch (err) {
+          $("#guess-msg").textContent = err.message;
+          tell.disabled = false;
+        }
+      });
+    }
+  }
+
+  async function startGuess(button) {
+    try {
+      const data = await api("guess", { method: "POST" });
+      guessRender(data.game, null);
+    } catch (err) {
+      $("#guess-msg").textContent = err.message;
+      if (button) button.disabled = false;
+    }
+  }
+
+  async function payForGuess(button) {
+    try {
+      const invoice = await api("invoice", {
+        method: "POST",
+        body: JSON.stringify({ kind: "guess" }),
+      });
+      if (!tg || !tg.openInvoice) {
+        $("#guess-msg").textContent = "Оплата открывается только внутри Telegram.";
+        button.disabled = false;
+        return;
+      }
+      tg.openInvoice(invoice.link, async (status) => {
+        if (status === "paid") {
+          await startGuess(button);
+          return;
+        }
+        $("#guess-msg").textContent =
+          status === "failed" ? "Оплата не прошла." : "Оплата отменена.";
+        button.disabled = false;
+      });
+    } catch (err) {
+      $("#guess-msg").textContent = err.message;
+      button.disabled = false;
+    }
+  }
+
   async function spreadList() {
     const body = $("#spread-body");
     flow = null;
@@ -1070,7 +1331,7 @@
       const data = config || (await loadConfig());
       // Остаток свой у каждого: за приглашённых и промокоды он длиннее
       const me = await api("me").catch(() => null);
-      body.innerHTML = priceNote(data, me) + data.spreads
+      body.innerHTML = priceNote(data, me) + guessEntry() + data.spreads
         .map(
           (s) => `
           <div class="card tap" data-spread="${esc(s.key)}">
@@ -1080,6 +1341,10 @@
           </div>`
         )
         .join("");
+      $("#guess-go").addEventListener("click", () => {
+        tap();
+        guessView();
+      });
       body.querySelectorAll("[data-spread]").forEach((node) =>
         node.addEventListener("click", () => {
           tap();

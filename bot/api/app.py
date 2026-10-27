@@ -1516,7 +1516,7 @@ def turn_payload(turn: guess_rules.Turn) -> dict[str, Any]:
 
 def game_payload(game: guess_rules.Game, settings: Settings) -> dict[str, Any]:
     pending = game.pending
-    return {
+    body: dict[str, Any] = {
         "status": game.status,
         "asked": game.asked,
         "left": game.left,
@@ -1526,6 +1526,11 @@ def game_payload(game: guess_rules.Game, settings: Settings) -> dict[str, Any]:
         "history": [turn_payload(turn) for turn in game.turns if turn.graded],
         "free_games": settings.guess_free_games,
     }
+    # Ключа нет, пока нечего возвращать: о гарантии не должно быть слышно до
+    # проигрыша, а пустое поле с таким именем — уже намёк
+    if game.refund is not None:
+        body["refund"] = game.refund
+    return body
 
 
 async def guess_about(repo: Repo, user_id: int) -> str:
@@ -1682,12 +1687,15 @@ async def handle_guess_answer(request: web.Request) -> web.Response:
                 identity.user.id,
                 analytics.GUESS_WON if game.status == guess_rules.WON else analytics.GUESS_LOST,
             )
-            refund = None
             if game.status == guess_rules.LOST:
-                refund = await refund_lost_party(
+                game.refund = await refund_lost_party(
                     request, repo, settings, row, identity.user.id
                 )
-            return json_ok({"game": game_payload(game, settings), "refund": refund})
+                if game.refund is not None:
+                    # Пишем в партию, а не только в этот ответ: экран её
+                    # перечитает и после закрытия приложения
+                    await repo.save_game(row, guess_rules.game_json(game), game.status)
+            return json_ok({"game": game_payload(game, settings)})
 
         try:
             turn = await guessing.step(
