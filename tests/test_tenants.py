@@ -202,3 +202,19 @@ async def test_a_rule_can_be_changed_without_sql(tmp_path, monkeypatch):
     assert "bot_token" not in EDITABLE
     assert await edit(Namespace(slug="origin", field="bot_token", value="999:x")) == 2
     get_settings.cache_clear()
+
+
+def test_every_editable_field_is_really_stored():
+    """Поле без колонки меняется молча и в никуда: setattr не жалуется."""
+    from bot.db.models import Tenant
+    from bot.tenants import EDITABLE
+
+    columns = {column.name for column in Tenant.__table__.columns}
+    assert set(EDITABLE) <= columns, set(EDITABLE) - columns
+
+
+def test_everything_editable_from_outside_is_editable_at_all():
+    from bot.api.app import OPS_FIELDS
+    from bot.tenants import EDITABLE
+
+    assert OPS_FIELDS <= set(EDITABLE), OPS_FIELDS - set(EDITABLE)

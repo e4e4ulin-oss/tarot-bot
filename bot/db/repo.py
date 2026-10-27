@@ -161,8 +161,10 @@ class Repo:
         )
         return int(result.scalar_one())
 
-    async def start_game(self, user_id: int) -> GuessGame:
-        game = GuessGame(tenant_id=self.tenant_id, user_id=user_id, state={})
+    async def start_game(self, user_id: int, payment_id: int | None = None) -> GuessGame:
+        game = GuessGame(
+            tenant_id=self.tenant_id, user_id=user_id, state={}, payment_id=payment_id
+        )
         self.session.add(game)
         await self.session.commit()
         return game
@@ -173,6 +175,24 @@ class Repo:
         if status != "active" and row.finished_at is None:
             row.finished_at = utcnow()
         await self.session.commit()
+
+    async def count_refunds(self, user_id: int, kind: str) -> int:
+        """Сколько раз этому человеку уже возвращали деньги за такой товар."""
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(Payment)
+            .where(
+                Payment.tenant_id == self.tenant_id,
+                Payment.user_id == user_id,
+                Payment.kind == kind,
+                Payment.refunded_at.is_not(None),
+            )
+        )
+        return int(result.scalar_one())
+
+    async def payment(self, payment_id: int) -> Payment | None:
+        row = await self.session.get(Payment, payment_id)
+        return row if row is not None and row.tenant_id == self.tenant_id else None
 
     async def remember_secret(self, row: GuessGame, name: str) -> None:
         row.secret = name[:128]

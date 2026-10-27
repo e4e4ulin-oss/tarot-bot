@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date
 
 import pytest
@@ -25,6 +26,20 @@ PLAYER = 501
 
 def auth(user_id: int = PLAYER) -> dict[str, str]:
     return {"Authorization": "tma " + make_init_data(TOKEN, user_id=user_id)}
+
+
+class FakeBot:
+    """Возвраты не уходят в Telegram: записываем, что попросили вернуть."""
+
+    def __init__(self, broken: bool = False) -> None:
+        self.refunds: list[tuple[int, str]] = []
+        self.broken = broken
+
+    async def refund_star_payment(self, user_id: int, telegram_payment_charge_id: str):
+        if self.broken:
+            raise RuntimeError("Telegram отказал")
+        self.refunds.append((user_id, telegram_payment_charge_id))
+        return True
 
 
 class FakeGuessing:
@@ -62,7 +77,7 @@ def lead_turn(*names):
 async def make_client(tmp_path):
     created = []
 
-    async def build(guessing, *, profile: bool = True, **extra):
+    async def build(guessing, *, profile: bool = True, robot=None, **extra):
         engine = create_engine(f"sqlite+aiosqlite:///{tmp_path}/guess{len(created)}.db")
         await init_models(engine)
         factory = create_session_factory(engine)
@@ -81,10 +96,18 @@ async def make_client(tmp_path):
                 await repo.upsert_user(PLAYER, None, "Игрок")
                 await repo.save_profile(PLAYER, birth_date=date(1975, 6, 1), city="Москва")
 
-        app = create_app(settings, factory, tokens, brands, guessing=guessing)
+        robot_for_app = robot or FakeBot()
+
+        async def bots(tenant_id: int):
+            return robot_for_app
+
+        app = create_app(
+            settings, factory, tokens, brands, bots=bots, guessing=guessing
+        )
         client = TestClient(TestServer(app))
         await client.start_server()
         client.sessions = factory
+        client.robot = robot_for_app
         created.append((client, engine))
         return client
 
@@ -315,3 +338,136 @@ async def test_a_paid_party_needs_no_profile(make_client):
     assert offer["needs_profile"] is False
     assert offer["can_start"] is True
     assert (await client.post("/api/guess", headers=auth())).status == 200
+
+
+# --- гарантия: не справились — вернули --------------------------------------
+
+
+async def paid_party(client, guessing, *, turns_left=0):
+    """Доводит человека до оплаченной партии и возвращает её строку."""
+    async with client.sessions() as session:
+        repo = Repo(session)
+        row = await repo.start_game(PLAYER)  # первая, бесплатная
+        await repo.save_game(row, {}, guess.WON)
+        await repo.add_payment(
+            user_id=PLAYER, amount=100, currency="XTR", charge_id="pay-1", kind="guess_game"
+        )
+    await client.post("/api/guess", headers=auth())
+    async with client.sessions() as session:
+        return await Repo(session).active_game(PLAYER)
+
+
+async def lose_the_party(client):
+    """Доводит активную партию до проигрыша: бюджет имён исчерпан."""
+    async with client.sessions() as session:
+        repo = Repo(session)
+        row = await repo.active_game(PLAYER)
+        game = guess.game_of(row.state)
+        game.missed = ["Раз", "Два"]
+        game.turns = [
+            guess.Turn(names=["Три"], card="major_17", reading="Карты называют")
+        ]
+        await repo.save_game(row, guess.game_json(game), guess.ACTIVE)
+    return await client.post("/api/guess/answer", headers=auth(), json={"verdict": "no"})
+
+
+@pytest.mark.asyncio
+async def test_a_lost_paid_party_gives_the_stars_back(make_client):
+    client = await make_client(FakeGuessing())
+    row = await paid_party(client, None)
+    assert row.payment_id is not None  # партия помнит, чем за неё заплатили
+
+    data = await (await lose_the_party(client)).json()
+
+    assert data["game"]["status"] == guess.LOST
+    assert data["refund"] == {"amount": 100, "unit": "⭐"}
+    assert client.robot.refunds == [(PLAYER, "pay-1")]
+
+    async with client.sessions() as session:
+        # Возвращённое не считается выручкой
+        assert await Repo(session).payments_summary() == {"count": 0, "totals": {}}
+
+
+@pytest.mark.asyncio
+async def test_a_won_party_keeps_the_stars(make_client):
+    client = await make_client(FakeGuessing(lead_turn("Фредди Меркьюри")))
+    await paid_party(client, None)
+
+    data = await (
+        await client.post("/api/guess/answer", headers=auth(), json={"verdict": "yes"})
+    ).json()
+
+    assert data["game"]["status"] == guess.WON
+    assert data["refund"] is None
+    assert client.robot.refunds == []
+
+
+@pytest.mark.asyncio
+async def test_a_free_party_has_nothing_to_give_back(make_client):
+    client = await make_client(FakeGuessing())
+    await client.post("/api/guess", headers=auth())
+
+    data = await (await lose_the_party(client)).json()
+
+    assert data["game"]["status"] == guess.LOST
+    assert data["refund"] is None
+    assert client.robot.refunds == []
+
+
+@pytest.mark.asyncio
+async def test_the_guarantee_runs_out_after_the_set_number(make_client):
+    """«Не угадал» нажимает игрок: без предохранителя игра стала бы бесплатной."""
+    client = await make_client(FakeGuessing(), GUESS_REFUNDS_MAX=0)
+    await paid_party(client, None)
+
+    data = await (await lose_the_party(client)).json()
+
+    assert data["game"]["status"] == guess.LOST
+    assert data["refund"] is None
+    assert client.robot.refunds == []
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_from_telegram_does_not_break_the_ending(make_client):
+    client = await make_client(FakeGuessing(), robot=FakeBot(broken=True))
+    await paid_party(client, None)
+
+    res = await lose_the_party(client)
+    assert res.status == 200
+    data = await res.json()
+    assert data["game"]["status"] == guess.LOST
+    assert data["refund"] is None
+
+
+@pytest.mark.asyncio
+async def test_nothing_about_the_guarantee_leaks_before_the_end(make_client):
+    """Узнать о возврате можно только проиграв: в этом вся затея."""
+    client = await make_client(FakeGuessing())
+    await paid_party(client, None)
+
+    state = await (await client.get("/api/guess", headers=auth())).json()
+    assert "refund" not in json.dumps(state, ensure_ascii=False)
+    assert "верн" not in json.dumps(state, ensure_ascii=False).lower()
+
+
+@pytest.mark.asyncio
+async def test_the_third_loss_in_a_row_is_not_paid_back(make_client):
+    """Два возврата на человека: дальше гарантия кончается, и молча."""
+    client = await make_client(FakeGuessing())
+
+    async with client.sessions() as session:
+        repo = Repo(session)
+        # Два возврата уже были
+        for number in (1, 2):
+            payment = await repo.add_payment(
+                user_id=PLAYER, amount=100, currency="XTR",
+                charge_id=f"old-{number}", kind="guess_game",
+            )
+            await repo.mark_refunded(payment)
+
+    await paid_party(client, None)
+    data = await (await lose_the_party(client)).json()
+
+    assert data["game"]["status"] == guess.LOST
+    assert data["refund"] is None
+    assert client.robot.refunds == []

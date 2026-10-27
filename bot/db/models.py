@@ -323,6 +323,9 @@ class GuessGame(Base):
     # Кого загадали. Заполняется, только когда карты сдались и человек сам
     # рассказал: по этим записям видно, на ком бот спотыкается
     secret: Mapped[str | None] = mapped_column(String(128), default=None)
+    # Чем за партию заплатили. Нужно для возврата: вернуть надо именно тот
+    # платёж, а не любой подходящий по сумме
+    payment_id: Mapped[int | None] = mapped_column(Integer, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None
@@ -368,6 +371,8 @@ class Tenant(Base):
     auto_reading_stars: Mapped[int] = mapped_column(Integer, default=50, server_default="50")
     natal_reading_stars: Mapped[int] = mapped_column(Integer, default=150, server_default="150")
     guess_game_stars: Mapped[int] = mapped_column(Integer, default=100, server_default="100")
+    guess_free_games: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    guess_refunds_max: Mapped[int] = mapped_column(Integer, default=2, server_default="2")
 
     miniapp_url: Mapped[str] = mapped_column(String(256), default="")
 

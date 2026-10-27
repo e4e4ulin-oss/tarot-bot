@@ -1007,6 +1007,9 @@ OPS_FIELDS = frozenset(
     {
         "auto_reading_stars",
         "natal_reading_stars",
+        "guess_game_stars",
+        "guess_free_games",
+        "guess_refunds_max",
         "free_auto_readings",
         "free_without_daily",
         "free_daily_limit",
@@ -1634,14 +1637,16 @@ async def handle_guess_start(request: web.Request) -> web.Response:
 
         # Платим только теперь: до первого хода игры ещё нет, и списывать
         # звёзды за несостоявшуюся партию нельзя
+        spent = None
         paid = await repo.unspent_payment(identity.user.id, PAYLOAD_GUESS)
         if paid is not None and not owns(settings, identity.user.id):
             played = await repo.count_games(identity.user.id)
             if played >= settings.guess_free_games:
                 await repo.spend_payment(paid)
+                spent = paid.id
 
         game.turns.append(turn)
-        row = await repo.start_game(identity.user.id)
+        row = await repo.start_game(identity.user.id, payment_id=spent)
         await repo.save_game(row, guess_rules.game_json(game), game.status)
         await repo.log_event(identity.user.id, analytics.GUESS_STARTED)
 
@@ -1677,7 +1682,12 @@ async def handle_guess_answer(request: web.Request) -> web.Response:
                 identity.user.id,
                 analytics.GUESS_WON if game.status == guess_rules.WON else analytics.GUESS_LOST,
             )
-            return json_ok({"game": game_payload(game, settings)})
+            refund = None
+            if game.status == guess_rules.LOST:
+                refund = await refund_lost_party(
+                    request, repo, settings, row, identity.user.id
+                )
+            return json_ok({"game": game_payload(game, settings), "refund": refund})
 
         try:
             turn = await guessing.step(
@@ -1696,6 +1706,44 @@ async def handle_guess_answer(request: web.Request) -> web.Response:
         await repo.save_game(row, guess_rules.game_json(game), game.status)
 
     return json_ok({"game": game_payload(game, settings)})
+
+
+async def refund_lost_party(
+    request: web.Request, repo: Repo, settings: Settings, row, user_id: int
+) -> dict[str, Any] | None:
+    """Карты не справились — звёзды возвращаются.
+
+    Человек узнаёт об этом только здесь: обещание в начале звучит как
+    оговорка, а возврат в конце запоминается. Предохранитель нужен потому,
+    что «не угадал» нажимает сам игрок — после двух возвратов гарантия молча
+    кончается, вместо того чтобы стать бесплатной игрой для всех.
+    """
+    if row.payment_id is None or settings.guess_refunds_max <= 0:
+        return None
+
+    payment = await repo.payment(row.payment_id)
+    if payment is None or payment.refunded_at is not None or not payment.charge_id:
+        return None
+    if await repo.count_refunds(user_id, PAYLOAD_GUESS) >= settings.guess_refunds_max:
+        return None
+
+    bots: BotProvider = request.app[BOTS]
+    bot = await bots(row.tenant_id)
+    if bot is None:
+        logger.warning("Возврат за партию %s не сделан: бот недоступен", row.id)
+        return None
+
+    try:
+        await bot.refund_star_payment(
+            user_id=user_id, telegram_payment_charge_id=payment.charge_id
+        )
+    except Exception as exc:  # отказ Telegram не должен ломать конец партии
+        logger.warning("Telegram отказал в возврате за партию %s: %s", row.id, exc)
+        return None
+
+    await repo.mark_refunded(payment)
+    logger.info("Возврат за проигранную партию %s: %s %s", row.id, payment.amount, payment.currency)
+    return {"amount": payment.amount, "unit": billing.sign(payment.currency, settings)}
 
 
 async def handle_guess_secret(request: web.Request) -> web.Response:
