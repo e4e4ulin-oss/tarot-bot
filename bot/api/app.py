@@ -1544,18 +1544,30 @@ async def guess_offer(repo: Repo, settings: Settings, user_id: int) -> dict[str,
     owner = owns(settings, user_id)
     paid = await repo.unspent_payment(user_id, PAYLOAD_GUESS)
     deal = billing.terms(settings, PAYLOAD_GUESS)
+
+    user = await repo.get_user(user_id)
+    profile = guess_rules.profile_ready(
+        birth_date=user.birth_date if user else None,
+        city=(user.city or user.birth_city) if user else None,
+    )
+    free_left = max(0, settings.guess_free_games - played)
+
     return {
         "played": played,
         "free_games": settings.guess_free_games,
-        "free_left": max(0, settings.guess_free_games - played) if not owner else None,
+        "free_left": None if owner else free_left,
         "paid": paid is not None,
         "price": deal.price if deal else 0,
         "unit": deal.unit if deal else "",
+        "profile": profile,
+        # Данные нужны только ради бесплатной: заплатившего ни о чём не просим
+        "needs_profile": not profile and not owner and free_left > 0 and paid is None,
         "can_start": guess_rules.may_start(
             played=played,
             free_games=settings.guess_free_games,
             paid=paid is not None,
             owner=owner,
+            profile=profile,
         ),
     }
 
@@ -1599,6 +1611,12 @@ async def handle_guess_start(request: web.Request) -> web.Response:
 
         offer = await guess_offer(repo, settings, identity.user.id)
         if not offer["can_start"]:
+            if offer["needs_profile"]:
+                return json_error(
+                    "Заполните дату рождения и город — и первая партия ваша",
+                    403,
+                    "needs_profile",
+                )
             return json_error("Партия оплачивается отдельно", 402, "needs_payment")
 
         game = guess_rules.Game()

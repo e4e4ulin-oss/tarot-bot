@@ -418,13 +418,28 @@ def options(turn: Turn) -> tuple[str, ...]:
     return VERDICTS
 
 
-def may_start(*, played: int, free_games: int, paid: bool, owner: bool) -> bool:
-    """Можно ли начать партию прямо сейчас."""
-    if owner:
+def profile_ready(*, birth_date: date | None, city: str | None) -> bool:
+    """Хватает ли данных, чтобы подсказка о круге работала.
+
+    Спрашиваем ровно то, чем игра пользуется: год рождения и город. Время
+    рождения нужно натальной карте, а здесь оно ни на что не влияет — просить
+    его в обмен на партию было бы вымогательством без причины.
+    """
+    return birth_date is not None and bool(city)
+
+
+def may_start(
+    *, played: int, free_games: int, paid: bool, owner: bool, profile: bool = True
+) -> bool:
+    """Можно ли начать партию прямо сейчас.
+
+    Бесплатная партия даётся в обмен на данные о себе: с ними карты читают
+    точнее, и это честный размен. Оплаченная идёт без условий — заплатившему
+    выставлять ещё и требования незачем.
+    """
+    if owner or paid:
         return True
-    if played < free_games:
-        return True
-    return paid
+    return played < free_games and profile
 
 
 def turn_json(turn: Turn) -> dict:

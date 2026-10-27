@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 import pytest_asyncio
 from aiohttp.test_utils import TestClient, TestServer
@@ -60,7 +62,7 @@ def lead_turn(*names):
 async def make_client(tmp_path):
     created = []
 
-    async def build(guessing, **extra):
+    async def build(guessing, *, profile: bool = True, **extra):
         engine = create_engine(f"sqlite+aiosqlite:///{tmp_path}/guess{len(created)}.db")
         await init_models(engine)
         factory = create_session_factory(engine)
@@ -71,6 +73,13 @@ async def make_client(tmp_path):
 
         async def brands(tenant_id: int) -> Settings:
             return settings
+
+        if profile:
+            # Бесплатная партия даётся в обмен на данные: без них не начать
+            async with factory() as session:
+                repo = Repo(session)
+                await repo.upsert_user(PLAYER, None, "Игрок")
+                await repo.save_profile(PLAYER, birth_date=date(1975, 6, 1), city="Москва")
 
         app = create_app(settings, factory, tokens, brands, guessing=guessing)
         client = TestClient(TestServer(app))
@@ -263,3 +272,46 @@ async def test_the_party_has_its_own_invoice(make_client):
     assert deal.price == settings.guess_game_stars
     assert deal.payload == "guess_game"
     assert billing.terms(settings, billing.PAYLOAD_AUTO).payload != deal.payload
+
+
+@pytest.mark.asyncio
+async def test_the_free_party_waits_for_the_data_it_will_use(make_client):
+    """Данные нужны подсказке о круге — за них и даётся бесплатная партия."""
+    client = await make_client(FakeGuessing(), profile=False)
+
+    offer = (await (await client.get("/api/guess", headers=auth())).json())["offer"]
+    assert offer["can_start"] is False
+    assert offer["needs_profile"] is True
+
+    res = await client.post("/api/guess", headers=auth())
+    assert res.status == 403
+    assert (await res.json())["error"] == "needs_profile"
+
+    async with client.sessions() as session:
+        assert await Repo(session).count_games(PLAYER) == 0
+
+
+@pytest.mark.asyncio
+async def test_once_the_data_is_there_the_party_starts(make_client):
+    client = await make_client(FakeGuessing())
+
+    offer = (await (await client.get("/api/guess", headers=auth())).json())["offer"]
+    assert offer["needs_profile"] is False
+    assert offer["can_start"] is True
+    assert (await client.post("/api/guess", headers=auth())).status == 200
+
+
+@pytest.mark.asyncio
+async def test_a_paid_party_needs_no_profile(make_client):
+    client = await make_client(FakeGuessing(), profile=False)
+    async with client.sessions() as session:
+        repo = Repo(session)
+        await repo.upsert_user(PLAYER, None, "Игрок")
+        await repo.add_payment(
+            user_id=PLAYER, amount=100, currency="XTR", charge_id="c9", kind="guess_game"
+        )
+
+    offer = (await (await client.get("/api/guess", headers=auth())).json())["offer"]
+    assert offer["needs_profile"] is False
+    assert offer["can_start"] is True
+    assert (await client.post("/api/guess", headers=auth())).status == 200

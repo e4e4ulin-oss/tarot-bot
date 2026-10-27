@@ -456,3 +456,21 @@ def test_the_circle_is_a_hint_and_the_prompt_says_so():
 def test_an_unknown_circle_adds_nothing_to_the_prompt():
     text = guess.prompt(Game(), "Шут", CARD_YES)
     assert "Загадывает человек" not in text
+
+
+def test_the_free_party_is_traded_for_the_data_it_needs():
+    from datetime import date
+
+    filled = dict(played=0, free_games=1, paid=False, owner=False)
+    assert guess.may_start(**filled, profile=True) is True
+    assert guess.may_start(**filled, profile=False) is False
+
+    assert guess.profile_ready(birth_date=date(1975, 6, 1), city="Москва") is True
+    assert guess.profile_ready(birth_date=date(1975, 6, 1), city=None) is False
+    assert guess.profile_ready(birth_date=None, city="Москва") is False
+
+
+def test_a_paid_party_asks_for_nothing():
+    """Заплатившему выставлять ещё и условия незачем."""
+    assert guess.may_start(played=9, free_games=1, paid=True, owner=False, profile=False) is True
+    assert guess.may_start(played=9, free_games=1, paid=False, owner=True, profile=False) is True
