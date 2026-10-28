@@ -482,3 +482,53 @@ async def test_the_refund_is_still_there_when_the_app_is_reopened(make_client):
 
     state = await (await client.get("/api/guess", headers=auth())).json()
     assert state["game"]["refund"] == {"amount": 100, "unit": "⭐"}
+
+
+# --- партия, у которой оборвался ход ----------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_party_whose_turn_never_came_can_be_resumed(make_client):
+    """Модель была занята: оценка сохранилась, ход — нет. Это не тупик."""
+    guessing = FakeGuessing(question_turn("Он жив?"))
+    client = await make_client(guessing)
+    await client.post("/api/guess", headers=auth())
+
+    guessing.broken = True
+    assert (
+        await client.post("/api/guess/answer", headers=auth(), json={"verdict": "yes"})
+    ).status == 503
+
+    state = await (await client.get("/api/guess", headers=auth())).json()
+    assert state["game"]["status"] == "active"
+    assert state["game"]["turn"] is None  # ход не состоялся
+    assert state["game"]["history"][0]["verdict"] == "yes"  # а оценка цела
+
+    guessing.broken = False
+    data = await (await client.post("/api/guess", headers=auth())).json()
+    assert data["game"]["turn"]["question"] == "Вопрос 3?"
+    assert data["game"]["asked"] == 2
+
+
+@pytest.mark.asyncio
+async def test_resuming_costs_nothing_and_starts_no_second_party(make_client):
+    client = await make_client(FakeGuessing())
+    await client.post("/api/guess", headers=auth())
+    await client.post("/api/guess", headers=auth())
+
+    async with client.sessions() as session:
+        assert await Repo(session).count_games(PLAYER) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_party_still_stuck_says_so_instead_of_pretending(make_client):
+    guessing = FakeGuessing(question_turn())
+    client = await make_client(guessing)
+    await client.post("/api/guess", headers=auth())
+
+    guessing.broken = True
+    await client.post("/api/guess/answer", headers=auth(), json={"verdict": "yes"})
+
+    res = await client.post("/api/guess", headers=auth())
+    assert res.status == 503
+    assert (await res.json())["error"] == "no_model"

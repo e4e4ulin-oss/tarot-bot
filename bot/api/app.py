@@ -1615,6 +1615,25 @@ async def handle_guess_start(request: web.Request) -> web.Response:
         if running is not None:
             # Вторая партия поверх первой — двойная плата ни за что
             game = guess_rules.game_of(running.state)
+            if game.pending is not None:
+                return json_ok({"game": game_payload(game, settings)})
+
+            # Ход не сложился в прошлый раз — модель была занята, оценка
+            # сохранилась, а ход нет. Без этого партия остаётся живой, но
+            # без хода: продолжить нельзя, начать новую тоже
+            try:
+                turn = await guessing.step(
+                    game,
+                    allow_reversed=settings.allow_reversed,
+                    reversed_chance=settings.reversed_chance,
+                    about=await guess_about(repo, identity.user.id),
+                )
+            except (GrokError, TimeoutError) as exc:
+                logger.warning("Партия %s не продолжилась: %s", running.id, exc)
+                return json_error("Карты не отозвались, попробуйте ещё раз", 503, "no_model")
+
+            game.turns.append(turn)
+            await repo.save_game(running, guess_rules.game_json(game), game.status)
             return json_ok({"game": game_payload(game, settings)})
 
         offer = await guess_offer(repo, settings, identity.user.id)

@@ -1079,12 +1079,16 @@
       </div>`;
   }
 
-  async function guessView() {
+  async function guessView(notice) {
     const body = $("#spread-body");
     body.innerHTML = `<p class="waiting">Смотрю, что было…</p>`;
     try {
       const data = await api("guess");
       guessRender(data.game, data.offer);
+      if (notice) {
+        const line = $("#guess-msg");
+        if (line) line.textContent = notice;
+      }
     } catch (err) {
       fail(body, err);
     }
@@ -1098,6 +1102,10 @@
       body.innerHTML = head + guessEnd(game);
     } else if (game && game.turn) {
       body.innerHTML = head + guessTurn(game);
+    } else if (game && game.status === "active") {
+      // Партия жива, а хода нет: прошлый не сложился. Показать здесь
+      // предложение начать — значит соврать, что партии нет
+      body.innerHTML = head + guessStuck();
     } else {
       body.innerHTML = head + guessOffer(offer);
     }
@@ -1107,6 +1115,17 @@
       spreadList();
     });
     bindGuess(game, offer);
+  }
+
+  function guessStuck() {
+    return `
+      <div class="card">
+        <h3>Карты задумались</h3>
+        <p>Ваш ответ записан, а следующий ход не сложился — так бывает, когда
+           модель перегружена. Партия на месте, можно продолжать.</p>
+      </div>
+      <button class="btn" id="guess-resume">Продолжить партию</button>
+      <p class="note" id="guess-msg"></p>`;
   }
 
   function guessOffer(offer) {
@@ -1239,6 +1258,15 @@
       });
     }
 
+    const resume = $("#guess-resume");
+    if (resume) {
+      resume.addEventListener("click", async () => {
+        resume.disabled = true;
+        tap("medium");
+        await startGuess(resume);
+      });
+    }
+
     const again = $("#guess-again");
     if (again) {
       again.addEventListener("click", () => {
@@ -1260,8 +1288,10 @@
             });
             guessRender(data.game, null);
           } catch (err) {
-            $("#guess-msg").textContent = err.message;
-            answers.querySelectorAll("button").forEach((b) => (b.disabled = false));
+            // Оценка могла дойти, а ход — нет. Включать кнопки обратно
+            // нельзя: второе нажатие получит «нечего оценивать». Спрашиваем
+            // сервер, что он на самом деле помнит
+            await guessView(err.message);
           }
         })
       );
