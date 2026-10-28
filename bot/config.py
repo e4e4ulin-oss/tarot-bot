@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     # купленная сотня покрывает ровно два расклада
     auto_reading_stars: int = Field(default=50, alias="AUTO_READING_STARS")
     natal_reading_stars: int = Field(default=150, alias="NATAL_READING_STARS")
+    # Показывать ли игру в приложении. Выключена: партия делает полтора-два
+    # десятка запросов к модели подряд и упирается в ограничение частоты у
+    # провайдера. Код на месте, включается одной настройкой.
+    guess_enabled: bool = Field(default=False, alias="GUESS_ENABLED")
     # Партия «карты читают задуманного». Дороже расклада, потому что ходов в
     # ней полтора-два десятка, и каждый — обращение к модели
     guess_game_stars: int = Field(default=100, alias="GUESS_GAME_STARS")

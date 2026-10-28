@@ -81,6 +81,7 @@ async def make_client(tmp_path):
         engine = create_engine(f"sqlite+aiosqlite:///{tmp_path}/guess{len(created)}.db")
         await init_models(engine)
         factory = create_session_factory(engine)
+        extra.setdefault("GUESS_ENABLED", True)
         settings = Settings(**extra)
 
         async def tokens() -> dict[int, str]:
@@ -532,3 +533,28 @@ async def test_a_party_still_stuck_says_so_instead_of_pretending(make_client):
     res = await client.post("/api/guess", headers=auth())
     assert res.status == 503
     assert (await res.json())["error"] == "no_model"
+
+
+# --- выключенная игра -------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_switched_off_game_cannot_be_started_through_the_address(make_client):
+    """Убрать с экрана — не то же самое, что закрыть: адрес знают и так."""
+    client = await make_client(FakeGuessing(), GUESS_ENABLED=False)
+
+    res = await client.post("/api/guess", headers=auth())
+    assert res.status == 404
+    assert (await res.json())["error"] == "not_found"
+
+    async with client.sessions() as session:
+        assert await Repo(session).count_games(PLAYER) == 0
+
+
+@pytest.mark.asyncio
+async def test_the_shop_front_says_whether_the_game_is_on(make_client):
+    off = await make_client(FakeGuessing(), GUESS_ENABLED=False)
+    assert (await (await off.get("/api/config")).json())["guess"] is False
+
+    on = await make_client(FakeGuessing())
+    assert (await (await on.get("/api/config")).json())["guess"] is True

@@ -1070,7 +1070,10 @@
 
   const GUESS_LABELS = { yes: "Да", no: "Нет", maybe: "Возможно", unknown: "Не знаю" };
 
-  function guessEntry() {
+  function guessEntry(data) {
+    // Игра показывается, только когда включена: партия жадна до модели, и
+    // при ограничении частоты у провайдера она обрывается на середине
+    if (!data || !data.guess) return "";
     return `
       <div class="card tap offer" id="guess-go">
         <h3>Карты читают задуманного</h3>
@@ -1361,7 +1364,7 @@
       const data = config || (await loadConfig());
       // Остаток свой у каждого: за приглашённых и промокоды он длиннее
       const me = await api("me").catch(() => null);
-      body.innerHTML = priceNote(data, me) + guessEntry() + data.spreads
+      body.innerHTML = priceNote(data, me) + guessEntry(data) + data.spreads
         .map(
           (s) => `
           <div class="card tap" data-spread="${esc(s.key)}">
@@ -1371,10 +1374,13 @@
           </div>`
         )
         .join("");
-      $("#guess-go").addEventListener("click", () => {
-        tap();
-        guessView();
-      });
+      const entry = $("#guess-go");
+      if (entry) {
+        entry.addEventListener("click", () => {
+          tap();
+          guessView();
+        });
+      }
       body.querySelectorAll("[data-spread]").forEach((node) =>
         node.addEventListener("click", () => {
           tap();

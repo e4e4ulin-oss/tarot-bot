@@ -370,6 +370,7 @@ class Tenant(Base):
     # владельца бота, то есть самого арендатора
     auto_reading_stars: Mapped[int] = mapped_column(Integer, default=50, server_default="50")
     natal_reading_stars: Mapped[int] = mapped_column(Integer, default=150, server_default="150")
+    guess_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     guess_game_stars: Mapped[int] = mapped_column(Integer, default=100, server_default="100")
     guess_free_games: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     guess_refunds_max: Mapped[int] = mapped_column(Integer, default=2, server_default="2")

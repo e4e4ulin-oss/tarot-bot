@@ -206,6 +206,7 @@ async def handle_config(request: web.Request) -> web.Response:
             "auto_price": auto.price if auto else 0,
             "natal_price": natal.price if natal else 0,
             "pay_unit": billing.STARS_SIGN,
+            "guess": settings.guess_enabled,
             "free_readings": settings.free_auto_readings,
             "free_needs_daily": settings.free_needs_daily,
             "free_without_daily": settings.free_without_daily,
@@ -1007,6 +1008,7 @@ OPS_FIELDS = frozenset(
     {
         "auto_reading_stars",
         "natal_reading_stars",
+        "guess_enabled",
         "guess_game_stars",
         "guess_free_games",
         "guess_refunds_max",
@@ -1606,6 +1608,9 @@ async def handle_guess_start(request: web.Request) -> web.Response:
     settings: Settings = request[BRAND]
     guessing: Guessing = request.app[GUESSING]
 
+    if not settings.guess_enabled:
+        # Выключена — значит её нет: адрес не должен быть лазейкой мимо экрана
+        return json_error("Не найдено", 404, "not_found")
     if not guessing.enabled:
         return json_error("Без модели карты молчат", 503, "no_model")
 
